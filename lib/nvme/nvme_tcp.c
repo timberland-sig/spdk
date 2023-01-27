@@ -421,7 +421,7 @@ nvme_tcp_build_contig_request(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_req
 {
 	struct nvme_request *req = tcp_req->req;
 
-	tcp_req->iov[0].iov_base = req->payload.contig_or_cb_arg + req->payload_offset;
+	tcp_req->iov[0].iov_base = (char *)req->payload.contig_or_cb_arg + req->payload_offset;
 	tcp_req->iov[0].iov_len = req->payload_size;
 	tcp_req->iovcnt = 1;
 
@@ -1458,6 +1458,8 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 		/* Wait for the pdu specific header  */
 		case NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_PSH:
 			pdu = &tqpair->recv_pdu;
+			SPDK_DEBUGLOG(nvme, "Read Protocol Specific Header. psh_valid_bytes: %d tqpair:%p\n",
+				      pdu->psh_valid_bytes, tqpair);
 			rc = nvme_tcp_read_data(tqpair->sock,
 						pdu->psh_len - pdu->psh_valid_bytes,
 						(uint8_t *)&pdu->hdr.raw + sizeof(struct spdk_nvme_tcp_common_pdu_hdr) + pdu->psh_valid_bytes);
@@ -1476,6 +1478,7 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 			nvme_tcp_pdu_psh_handle(tqpair, reaped);
 			break;
 		case NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_PAYLOAD:
+			SPDK_DEBUGLOG(nvme, "Read Payload Data\n");
 			pdu = &tqpair->recv_pdu;
 			/* check whether the data is valid, if not we just return */
 			if (!pdu->data_len) {
@@ -1507,6 +1510,7 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 			nvme_tcp_pdu_payload_handle(tqpair, reaped);
 			break;
 		case NVME_TCP_PDU_RECV_STATE_ERROR:
+			SPDK_ERRLOG("PDU receive start ERROR\n");
 			rc = NVME_TCP_PDU_FATAL;
 			break;
 		default:
@@ -1579,6 +1583,7 @@ nvme_tcp_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_c
 		max_completions = spdk_min(max_completions, tqpair->num_entries);
 	}
 
+	max_completions = 1;
 	reaped = 0;
 	do {
 		rc = nvme_tcp_read_pdu(tqpair, &reaped);
@@ -1680,7 +1685,7 @@ nvme_tcp_qpair_icreq_send(struct nvme_tcp_qpair *tqpair)
 	return 0;
 }
 
-static int
+int
 nvme_tcp_ctrlr_connect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpair *qpair)
 {
 	struct sockaddr_storage dst_addr;
@@ -1737,6 +1742,9 @@ nvme_tcp_ctrlr_connect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpa
 	spdk_sock_get_default_opts(&opts);
 	opts.priority = ctrlr->trid.priority;
 	opts.zcopy = !nvme_qpair_is_admin_queue(qpair) && qpair->poll_group != NULL;
+	if (ctrlr->opts.sock_ctx != NULL) {
+		opts.ctx = ctrlr->opts.sock_ctx;
+	}
 	tqpair->sock = spdk_sock_connect_ext(ctrlr->trid.traddr, port, NULL, &opts);
 	if (!tqpair->sock) {
 		SPDK_ERRLOG("sock connection error of tqpair=%p with addr=%s, port=%ld\n",
@@ -1823,6 +1831,8 @@ static struct spdk_nvme_ctrlr *nvme_tcp_ctrlr_construct(const struct spdk_nvme_t
 	union spdk_nvme_cap_register cap;
 	union spdk_nvme_vs_register vs;
 	int rc;
+
+	DEBUG ((DEBUG_INFO, "[nvme_tcp_ctrlr_construct] Entered.\n"));
 
 	tctrlr = calloc(1, sizeof(*tctrlr));
 	if (tctrlr == NULL) {

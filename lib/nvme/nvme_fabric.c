@@ -44,7 +44,7 @@ static int
 nvme_fabric_prop_set_cmd(struct spdk_nvme_ctrlr *ctrlr,
 			 uint32_t offset, uint8_t size, uint64_t value)
 {
-	struct spdk_nvmf_fabric_prop_set_cmd cmd = {};
+	struct spdk_nvmf_fabric_prop_set_cmd cmd = {0};
 	struct nvme_completion_poll_status *status;
 	int rc;
 
@@ -86,7 +86,7 @@ static int
 nvme_fabric_prop_get_cmd(struct spdk_nvme_ctrlr *ctrlr,
 			 uint32_t offset, uint8_t size, uint64_t *value)
 {
-	struct spdk_nvmf_fabric_prop_set_cmd cmd = {};
+	struct spdk_nvmf_fabric_prop_set_cmd cmd = {0};
 	struct nvme_completion_poll_status *status;
 	struct spdk_nvmf_fabric_prop_get_rsp *response;
 	int rc;
@@ -278,6 +278,9 @@ nvme_fabric_ctrlr_scan(struct spdk_nvme_probe_ctx *probe_ctx,
 	spdk_nvme_ctrlr_get_default_ctrlr_opts(&discovery_opts, sizeof(discovery_opts));
 	/* For discovery_ctrlr set the timeout to 0 */
 	discovery_opts.keep_alive_timeout_ms = 0;
+	if (probe_ctx->probe_cb) {
+		probe_ctx->probe_cb(probe_ctx->cb_ctx, &probe_ctx->trid, &discovery_opts);
+	}
 
 	discovery_ctrlr = nvme_transport_ctrlr_construct(&probe_ctx->trid, &discovery_opts, NULL);
 	if (discovery_ctrlr == NULL) {
@@ -440,8 +443,8 @@ nvme_fabric_qpair_connect(struct spdk_nvme_qpair *qpair, uint32_t num_entries)
 	SPDK_STATIC_ASSERT(sizeof(nvmf_data->hostid) == sizeof(ctrlr->opts.extended_host_id),
 			   "host ID size mismatch");
 	memcpy(nvmf_data->hostid, ctrlr->opts.extended_host_id, sizeof(nvmf_data->hostid));
-	snprintf(nvmf_data->hostnqn, sizeof(nvmf_data->hostnqn), "%s", ctrlr->opts.hostnqn);
-	snprintf(nvmf_data->subnqn, sizeof(nvmf_data->subnqn), "%s", ctrlr->trid.subnqn);
+	snprintf((char *)nvmf_data->hostnqn, sizeof(nvmf_data->hostnqn), "%s", ctrlr->opts.hostnqn);
+	snprintf((char *)nvmf_data->subnqn, sizeof(nvmf_data->subnqn), "%s", ctrlr->trid.subnqn);
 
 	rc = spdk_nvme_ctrlr_cmd_io_raw(ctrlr, qpair,
 					(struct spdk_nvme_cmd *)&cmd,

@@ -441,7 +441,9 @@ enum spdk_nvme_sgl_descriptor_subtype {
 	SPDK_NVME_SGL_SUBTYPE_TRANSPORT		= 0xa,
 };
 
-struct __attribute__((packed)) spdk_nvme_sgl_descriptor {
+#pragma pack(push,1)
+struct spdk_nvme_sgl_descriptor {
+
 	uint64_t address;
 	union {
 		struct {
@@ -465,6 +467,7 @@ struct __attribute__((packed)) spdk_nvme_sgl_descriptor {
 		} keyed;
 	};
 };
+#pragma pack(pop)
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_sgl_descriptor) == 16, "Incorrect size");
 
 enum spdk_nvme_psdt_value {
@@ -708,6 +711,9 @@ SPDK_STATIC_ASSERT(sizeof(union spdk_nvme_critical_warning_state) == 1, "Incorre
 /**
  * Data used by Set Features / Get Features \ref SPDK_NVME_FEAT_ASYNC_EVENT_CONFIGURATION
  */
+
+//Not used in EDK2 as it is giving incorrect structure size.
+#if 0
 union spdk_nvme_feat_async_event_configuration {
 	uint32_t raw;
 	struct {
@@ -719,6 +725,28 @@ union spdk_nvme_feat_async_event_configuration {
 		uint32_t reserved		: 20;
 	} bits;
 };
+
+SPDK_STATIC_ASSERT(sizeof(union spdk_nvme_feat_async_event_configuration) == 4, "Incorrect size");
+#endif
+
+union spdk_nvme_feat_async_event_configuration {
+	uint32_t raw;
+
+	struct {
+		uint32_t crit_warn_available_spare : 1;
+		uint32_t crit_warn_temperature : 1;
+		uint32_t crit_warn_device_reliability : 1;
+		uint32_t crit_warn_read_only : 1;
+		uint32_t crit_warn_volatile_memory_backup : 1;
+		uint32_t crit_warn_reserved : 3;
+		uint32_t ns_attr_notice : 1;
+		uint32_t fw_activation_notice : 1;
+		uint32_t telemetry_log_notice : 1;
+		uint32_t ana_change_notice : 1;
+		uint32_t reserved : 20;
+	} bits;
+};
+
 SPDK_STATIC_ASSERT(sizeof(union spdk_nvme_feat_async_event_configuration) == 4, "Incorrect size");
 
 /**
@@ -1617,7 +1645,8 @@ struct spdk_nvme_cdata_sgls {
 	uint32_t	reserved2 : 10;
 };
 
-struct __attribute__((packed)) __attribute__((aligned)) spdk_nvme_ctrlr_data {
+#pragma pack(push,1)
+struct spdk_nvme_ctrlr_data {
 	/* bytes 0-255: controller capabilities and features */
 
 	/** pci vendor id */
@@ -1997,7 +2026,7 @@ struct __attribute__((packed)) __attribute__((aligned)) spdk_nvme_ctrlr_data {
 	uint8_t			vs[1024];
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_ctrlr_data) == 4096, "Incorrect size");
-
+#pragma pack(pop)
 struct spdk_nvme_zns_ctrlr_data {
 	/** zone append size limit */
 	uint8_t			zasl;
@@ -2006,7 +2035,8 @@ struct spdk_nvme_zns_ctrlr_data {
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_zns_ctrlr_data) == 4096, "Incorrect size");
 
-struct __attribute__((packed)) spdk_nvme_primary_ctrl_capabilities {
+#pragma pack(push,1)
+struct spdk_nvme_primary_ctrl_capabilities {
 	/**  controller id */
 	uint16_t		cntlid;
 	/**  port identifier */
@@ -2047,7 +2077,7 @@ struct __attribute__((packed)) spdk_nvme_primary_ctrl_capabilities {
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_primary_ctrl_capabilities) == 4096, "Incorrect size");
 
-struct __attribute__((packed)) spdk_nvme_secondary_ctrl_entry {
+struct  spdk_nvme_secondary_ctrl_entry {
 	/** controller identifier of the secondary controller */
 	uint16_t		scid;
 	/** controller identifier of the associated primary controller */
@@ -2068,14 +2098,14 @@ struct __attribute__((packed)) spdk_nvme_secondary_ctrl_entry {
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_secondary_ctrl_entry) == 32, "Incorrect size");
 
-struct __attribute__((packed)) spdk_nvme_secondary_ctrl_list {
+struct  spdk_nvme_secondary_ctrl_list {
 	/** number of Secondary controller entries in the list */
 	uint8_t					number;
 	uint8_t					reserved[31];
 	struct spdk_nvme_secondary_ctrl_entry	entries[127];
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_secondary_ctrl_list) == 4096, "Incorrect size");
-
+#pragma pack(pop)
 struct spdk_nvme_ns_data {
 	/** namespace size */
 	uint64_t		nsze;
@@ -2385,7 +2415,8 @@ enum spdk_nvme_reservation_acquire_action {
 	SPDK_NVME_RESERVE_PREEMPT_ABORT		= 0x2,
 };
 
-struct __attribute__((packed)) spdk_nvme_reservation_status_data {
+#pragma pack(push,1)
+struct spdk_nvme_reservation_status_data {
 	/** reservation action generation counter */
 	uint32_t		gen;
 	/** reservation type */
@@ -2397,16 +2428,22 @@ struct __attribute__((packed)) spdk_nvme_reservation_status_data {
 	uint8_t			ptpls;
 	uint8_t			reserved[14];
 };
+#pragma pack(pop)
+
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_reservation_status_data) == 24, "Incorrect size");
 
-struct __attribute__((packed)) spdk_nvme_reservation_status_extended_data {
+#pragma pack(push,1)
+struct spdk_nvme_reservation_status_extended_data {
 	struct spdk_nvme_reservation_status_data	data;
 	uint8_t						reserved[40];
 };
+#pragma pack(pop)
+
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_reservation_status_extended_data) == 64,
 		   "Incorrect size");
 
-struct __attribute__((packed)) spdk_nvme_registered_ctrlr_data {
+#pragma pack(push,1)
+struct spdk_nvme_registered_ctrlr_data {
 	/** controller id */
 	uint16_t		cntlid;
 	/** reservation status */
@@ -2420,9 +2457,12 @@ struct __attribute__((packed)) spdk_nvme_registered_ctrlr_data {
 	/** reservation key */
 	uint64_t		rkey;
 };
+#pragma pack(pop)
+
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_registered_ctrlr_data) == 24, "Incorrect size");
 
-struct __attribute__((packed)) spdk_nvme_registered_ctrlr_extended_data {
+#pragma pack(push,1)
+struct spdk_nvme_registered_ctrlr_extended_data {
 	/** controller id */
 	uint16_t		cntlid;
 	/** reservation status */
@@ -2437,6 +2477,8 @@ struct __attribute__((packed)) spdk_nvme_registered_ctrlr_extended_data {
 	uint8_t			hostid[16];
 	uint8_t			reserved3[32];
 };
+#pragma pack(pop)
+
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_registered_ctrlr_extended_data) == 64, "Incorrect size");
 
 /**
@@ -2589,7 +2631,9 @@ SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_error_information_entry) == 64, "Inco
 /**
  * SMART / health information page (\ref SPDK_NVME_LOG_HEALTH_INFORMATION)
  */
-struct __attribute__((packed)) __attribute__((aligned)) spdk_nvme_health_information_page {
+
+#pragma pack(push,1)
+struct spdk_nvme_health_information_page {
 	union spdk_nvme_critical_warning_state	critical_warning;
 
 	uint16_t		temperature;
@@ -2624,6 +2668,8 @@ struct __attribute__((packed)) __attribute__((aligned)) spdk_nvme_health_informa
 
 	uint8_t			reserved2[296];
 };
+#pragma pack(pop)
+
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_health_information_page) == 512, "Incorrect size");
 
 /* Commands Supported and Effects Data Structure */

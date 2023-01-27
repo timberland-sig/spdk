@@ -183,6 +183,10 @@ spdk_nvme_ctrlr_get_default_ctrlr_opts(struct spdk_nvme_ctrlr_opts *opts, size_t
 		memset(opts->src_svcid, 0, sizeof(opts->src_svcid));
 	}
 
+	if (FIELD_OK(sock_ctx)) {
+		opts->sock_ctx = NULL;
+	}
+
 	if (FIELD_OK(host_id)) {
 		memset(opts->host_id, 0, sizeof(opts->host_id));
 	}
@@ -374,6 +378,7 @@ nvme_ctrlr_create_io_qpair(struct spdk_nvme_ctrlr *ctrlr,
 		nvme_robust_mutex_unlock(&ctrlr->ctrlr_lock);
 		return NULL;
 	}
+	SPDK_INFOLOG(nvme, "num_io_queues %d\n",  ctrlr->opts.num_io_queues);
 
 	TAILQ_INSERT_TAIL(&ctrlr->active_io_qpairs, qpair, tailq);
 
@@ -400,6 +405,7 @@ spdk_nvme_ctrlr_connect_io_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme
 	if (ctrlr->quirks & NVME_QUIRK_DELAY_AFTER_QUEUE_ALLOC) {
 		spdk_delay_us(100);
 	}
+	SPDK_INFOLOG(nvme, "num_io_queues %d\n",  ctrlr->opts.num_io_queues);
 
 	return rc;
 }
@@ -1356,7 +1362,7 @@ static void
 nvme_ctrlr_abort_queued_aborts(struct spdk_nvme_ctrlr *ctrlr)
 {
 	struct nvme_request	*req, *tmp;
-	struct spdk_nvme_cpl	cpl = {};
+	struct spdk_nvme_cpl	cpl = {0};
 
 	cpl.status.sc = SPDK_NVME_SC_ABORTED_SQ_DELETION;
 	cpl.status.sct = SPDK_NVME_SCT_GENERIC;
@@ -2420,7 +2426,7 @@ static int
 nvme_ctrlr_construct_namespaces(struct spdk_nvme_ctrlr *ctrlr)
 {
 	int rc = 0;
-	uint32_t i, nn = ctrlr->cdata.nn;
+	uint32_t i , maxnsid = 0, nn = ctrlr->cdata.nn;
 
 	/* ctrlr->num_ns may be 0 (startup) or a different number of namespaces (reset),
 	 * so check if we need to reallocate.
@@ -2433,6 +2439,18 @@ nvme_ctrlr_construct_namespaces(struct spdk_nvme_ctrlr *ctrlr)
 			return 0;
 		}
 
+		ctrlr->num_ns = nn;
+		rc = nvme_ctrlr_identify_active_ns(ctrlr);
+		if (rc == 0)
+		{
+			for (i = 1; i <= nn; i++)
+			if (spdk_nvme_ctrlr_is_active_ns(ctrlr, i) == true)
+			{
+				maxnsid = i;
+			}
+		}
+		nn = maxnsid;
+		ctrlr->cdata.nn = nn;
 		ctrlr->ns = spdk_zmalloc(nn * sizeof(struct spdk_nvme_ns), 64, NULL,
 					 SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_SHARE);
 		if (ctrlr->ns == NULL) {
@@ -2603,11 +2621,12 @@ nvme_ctrlr_configure_aer(struct spdk_nvme_ctrlr *ctrlr)
 	int						rc;
 
 	config.raw = 0;
-	config.bits.crit_warn.bits.available_spare = 1;
-	config.bits.crit_warn.bits.temperature = 1;
-	config.bits.crit_warn.bits.device_reliability = 1;
-	config.bits.crit_warn.bits.read_only = 1;
-	config.bits.crit_warn.bits.volatile_memory_backup = 1;
+
+	config.bits.crit_warn_available_spare = 1;
+	config.bits.crit_warn_temperature = 1;
+	config.bits.crit_warn_device_reliability = 1;
+	config.bits.crit_warn_read_only = 1;
+	config.bits.crit_warn_volatile_memory_backup = 1;
 
 	if (ctrlr->vs.raw >= SPDK_NVME_VERSION(1, 2, 0)) {
 		if (ctrlr->cdata.oaes.ns_attribute_notices) {
@@ -3281,7 +3300,6 @@ nvme_ctrlr_destruct_async(struct spdk_nvme_ctrlr *ctrlr,
 
 	ctrlr->is_destructed = true;
 
-	spdk_nvme_qpair_process_completions(ctrlr->adminq, 0);
 
 	nvme_ctrlr_abort_queued_aborts(ctrlr);
 	nvme_transport_admin_qpair_abort_aers(ctrlr->adminq);
@@ -3337,7 +3355,7 @@ nvme_ctrlr_destruct_poll_async(struct spdk_nvme_ctrlr *ctrlr,
 void
 nvme_ctrlr_destruct(struct spdk_nvme_ctrlr *ctrlr)
 {
-	struct nvme_ctrlr_detach_ctx ctx = {};
+	struct nvme_ctrlr_detach_ctx ctx = {0};
 	int rc;
 
 	nvme_ctrlr_destruct_async(ctrlr, &ctx);
@@ -3368,7 +3386,7 @@ nvme_keep_alive_completion(void *cb_ctx, const struct spdk_nvme_cpl *cpl)
  * Check if we need to send a Keep Alive command.
  * Caller must hold ctrlr->ctrlr_lock.
  */
-static int
+int
 nvme_ctrlr_keep_alive(struct spdk_nvme_ctrlr *ctrlr)
 {
 	uint64_t now;
@@ -3862,7 +3880,8 @@ spdk_nvme_ctrlr_update_firmware(struct spdk_nvme_ctrlr *ctrlr, void *payload, ui
 			}
 			return -ENXIO;
 		}
-		p += transfer;
+
+		p = (char *)p + transfer;
 		offset += transfer;
 		size_remaining -= transfer;
 	}

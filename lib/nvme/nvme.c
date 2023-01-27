@@ -36,6 +36,7 @@
 #include "nvme_internal.h"
 #include "nvme_io_msg.h"
 #include "nvme_uevent.h"
+#include "spdk/stdinc.h"
 
 #define SPDK_NVME_DRIVER_NAME "spdk_nvme_driver"
 
@@ -620,10 +621,8 @@ nvme_driver_init(void)
 	nvme_robust_mutex_lock(&g_spdk_nvme_driver->lock);
 
 	g_spdk_nvme_driver->initialized = false;
-	g_spdk_nvme_driver->hotplug_fd = nvme_uevent_connect();
-	if (g_spdk_nvme_driver->hotplug_fd < 0) {
-		SPDK_DEBUGLOG(nvme, "Failed to open uevent netlink socket\n");
-	}
+	g_spdk_nvme_driver->hotplug_fd = -1;
+
 
 	TAILQ_INIT(&g_spdk_nvme_driver->shared_attached_ctrlrs);
 
@@ -805,6 +804,7 @@ nvme_probe_internal(struct spdk_nvme_probe_ctx *probe_ctx,
 	int rc;
 	struct spdk_nvme_ctrlr *ctrlr, *ctrlr_tmp;
 
+	SPDK_INFOLOG(nvme, "trid trstring %s\n", probe_ctx->trid.trstring);
 	spdk_nvme_trid_populate_transport(&probe_ctx->trid, probe_ctx->trid.trtype);
 	if (!spdk_nvme_transport_available_by_name(probe_ctx->trid.trstring)) {
 		SPDK_ERRLOG("NVMe trtype %u not available\n", probe_ctx->trid.trtype);
@@ -889,6 +889,7 @@ spdk_nvme_probe(const struct spdk_nvme_transport_id *trid, void *cb_ctx,
 		trid = &trid_pcie;
 	}
 
+	SPDK_INFOLOG(nvme, "NVMe target address: %s\n", trid->traddr);
 	probe_ctx = spdk_nvme_probe_async(trid, cb_ctx, probe_cb,
 					  attach_cb, remove_cb);
 	if (!probe_ctx) {
@@ -1087,7 +1088,6 @@ spdk_nvme_trid_populate_transport(struct spdk_nvme_transport_id *trid,
 		break;
 	default:
 		SPDK_ERRLOG("no available transports\n");
-		assert(0);
 		return;
 	}
 	snprintf(trid->trstring, SPDK_NVMF_TRSTRING_MAX_LEN, "%s", trstring);
@@ -1348,11 +1348,11 @@ int
 spdk_nvme_host_id_parse(struct spdk_nvme_host_id *hostid, const char *str)
 {
 
-	size_t key_size = 32;
-	size_t val_size = 1024;
+	size_t key_size = KEYSIZE;
+	size_t val_size = VALSIZE;
 	size_t val_len;
-	char key[key_size];
-	char val[val_size];
+	char key[KEYSIZE];
+	char val[VALSIZE];
 
 	if (hostid == NULL || str == NULL) {
 		return -EINVAL;
@@ -1428,8 +1428,8 @@ spdk_nvme_transport_id_compare(const struct spdk_nvme_transport_id *trid1,
 	}
 
 	if (trid1->trtype == SPDK_NVME_TRANSPORT_PCIE) {
-		struct spdk_pci_addr pci_addr1 = {};
-		struct spdk_pci_addr pci_addr2 = {};
+		struct spdk_pci_addr pci_addr1 = {0};
+		struct spdk_pci_addr pci_addr2 = {0};
 
 		/* Normalize PCI addresses before comparing */
 		if (spdk_pci_addr_parse(&pci_addr1, trid1->traddr) < 0 ||
@@ -1527,6 +1527,7 @@ spdk_nvme_probe_async(const struct spdk_nvme_transport_id *trid,
 	int rc;
 	struct spdk_nvme_probe_ctx *probe_ctx;
 
+	SPDK_INFOLOG(nvme, "trid trtype %d\n", trid->trtype);
 	rc = nvme_driver_init();
 	if (rc != 0) {
 		return NULL;
