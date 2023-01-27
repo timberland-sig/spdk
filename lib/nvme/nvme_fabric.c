@@ -40,11 +40,14 @@
 #include "spdk/endian.h"
 #include "spdk/string.h"
 
+struct spdk_nvme_fail_trid   *fail_trid;
+LIST_ENTRY                   fail_conn;
+
 static int
 nvme_fabric_prop_set_cmd(struct spdk_nvme_ctrlr *ctrlr,
 			 uint32_t offset, uint8_t size, uint64_t value)
 {
-	struct spdk_nvmf_fabric_prop_set_cmd cmd = {};
+	struct spdk_nvmf_fabric_prop_set_cmd cmd = {0};
 	struct nvme_completion_poll_status *status;
 	int rc;
 
@@ -86,7 +89,7 @@ static int
 nvme_fabric_prop_get_cmd(struct spdk_nvme_ctrlr *ctrlr,
 			 uint32_t offset, uint8_t size, uint64_t *value)
 {
-	struct spdk_nvmf_fabric_prop_set_cmd cmd = {};
+	struct spdk_nvmf_fabric_prop_set_cmd cmd = {0};
 	struct nvme_completion_poll_status *status;
 	struct spdk_nvmf_fabric_prop_get_rsp *response;
 	int rc;
@@ -164,6 +167,18 @@ nvme_fabric_ctrlr_get_reg_8(struct spdk_nvme_ctrlr *ctrlr, uint32_t offset, uint
 	return nvme_fabric_prop_get_cmd(ctrlr, offset, SPDK_NVMF_PROP_SIZE_8, value);
 }
 
+void
+nvme_fabric_insert_fail_trid(struct spdk_nvme_transport_id* trid)
+{
+	struct spdk_nvme_fail_trid   *fail_trid;
+	fail_trid = calloc(1, sizeof(struct spdk_nvme_fail_trid));
+	if (fail_trid == NULL) {
+		SPDK_ERRLOG("Failed to allocate for failed trid info \n");
+	}
+	memcpy(&fail_trid->trid, &trid, sizeof(struct spdk_nvme_transport_id));
+	InsertTailList(&fail_conn, &fail_trid->link);
+}
+
 static void
 nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
 			   struct spdk_nvme_probe_ctx *probe_ctx,
@@ -172,6 +187,7 @@ nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
 	struct spdk_nvme_transport_id trid;
 	uint8_t *end;
 	size_t len;
+	int ret = -1;
 
 	memset(&trid, 0, sizeof(trid));
 
@@ -225,7 +241,11 @@ nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
 	/* Copy the priority from the discovery ctrlr */
 	trid.priority = discover_priority;
 
-	nvme_ctrlr_probe(&trid, probe_ctx, NULL);
+	ret = nvme_ctrlr_probe(&trid, probe_ctx, NULL);
+	if (ret == -1) {
+		/* Inserting failed discovered subsystem info for NBFT */
+		nvme_fabric_insert_fail_trid(&trid);
+	}
 }
 
 static int
@@ -278,6 +298,9 @@ nvme_fabric_ctrlr_scan(struct spdk_nvme_probe_ctx *probe_ctx,
 	spdk_nvme_ctrlr_get_default_ctrlr_opts(&discovery_opts, sizeof(discovery_opts));
 	/* For discovery_ctrlr set the timeout to 0 */
 	discovery_opts.keep_alive_timeout_ms = 0;
+	if (probe_ctx->probe_cb) {
+		probe_ctx->probe_cb(probe_ctx->cb_ctx, &probe_ctx->trid, &discovery_opts);
+	}
 
 	discovery_ctrlr = nvme_transport_ctrlr_construct(&probe_ctx->trid, &discovery_opts, NULL);
 	if (discovery_ctrlr == NULL) {
@@ -440,8 +463,8 @@ nvme_fabric_qpair_connect(struct spdk_nvme_qpair *qpair, uint32_t num_entries)
 	SPDK_STATIC_ASSERT(sizeof(nvmf_data->hostid) == sizeof(ctrlr->opts.extended_host_id),
 			   "host ID size mismatch");
 	memcpy(nvmf_data->hostid, ctrlr->opts.extended_host_id, sizeof(nvmf_data->hostid));
-	snprintf(nvmf_data->hostnqn, sizeof(nvmf_data->hostnqn), "%s", ctrlr->opts.hostnqn);
-	snprintf(nvmf_data->subnqn, sizeof(nvmf_data->subnqn), "%s", ctrlr->trid.subnqn);
+	snprintf((char *)nvmf_data->hostnqn, sizeof(nvmf_data->hostnqn), "%s", ctrlr->opts.hostnqn);
+	snprintf((char *)nvmf_data->subnqn, sizeof(nvmf_data->subnqn), "%s", ctrlr->trid.subnqn);
 
 	rc = spdk_nvme_ctrlr_cmd_io_raw(ctrlr, qpair,
 					(struct spdk_nvme_cmd *)&cmd,

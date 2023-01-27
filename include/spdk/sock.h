@@ -143,6 +143,11 @@ struct spdk_sock_opts {
 	 * Used to enable or disable zero copy on socket layer.
 	 */
 	bool zcopy;
+
+	/**
+	 * Additional external context required by socket implementation.
+	 */
+	void *ctx;
 };
 
 /**

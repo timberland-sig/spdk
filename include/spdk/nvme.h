@@ -170,6 +170,13 @@ struct spdk_nvme_ctrlr_opts {
 	char src_svcid[SPDK_NVMF_TRSVCID_MAX_LEN + 1];
 
 	/**
+	 * Additional context for socket creation.
+	 * In UEFI use case, this field allows to provide additional information
+	 * required for TcpIo instance creation.
+	 */
+	void *sock_ctx;
+
+	/**
 	 * The host identifier to use when connecting to controllers with 64-bit host ID support.
 	 *
 	 * Set to all zeroes to specify that no host ID should be provided to the controller.
@@ -2331,6 +2338,15 @@ enum spdk_nvme_dealloc_logical_block_read_value spdk_nvme_ns_get_dealloc_logical
  * granularity is reported.
  */
 uint32_t spdk_nvme_ns_get_optimal_io_boundary(struct spdk_nvme_ns *ns);
+
+/**
+ * Get the NGUID for the given namespace.
+ *
+ * \param ns Namespace to query.
+ *
+ * \return a pointer to namespace NGUID, or NULL if ns does not have a NGUID.
+ */
+const uint8_t *spdk_nvme_ns_get_nguid(const struct spdk_nvme_ns *ns);
 
 /**
  * Get the UUID for the given namespace.

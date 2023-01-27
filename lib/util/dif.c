@@ -83,7 +83,7 @@ static inline void
 _dif_sgl_get_buf(struct _dif_sgl *s, void **_buf, uint32_t *_buf_len)
 {
 	if (_buf != NULL) {
-		*_buf = s->iov->iov_base + s->iov_offset;
+		*_buf = (char *)s->iov->iov_base + s->iov_offset;
 	}
 	if (_buf_len != NULL) {
 		*_buf_len = s->iov->iov_len - s->iov_offset;
@@ -338,7 +338,7 @@ dif_generate(struct _dif_sgl *sgl, uint32_t num_blocks, const struct spdk_dif_ct
 			guard = spdk_crc16_t10dif(ctx->guard_seed, buf, ctx->guard_interval);
 		}
 
-		_dif_generate(buf + ctx->guard_interval, guard, offset_blocks, ctx);
+		_dif_generate((char *)buf + ctx->guard_interval, guard, offset_blocks, ctx);
 
 		_dif_sgl_advance(sgl, ctx->block_size);
 		offset_blocks++;
@@ -351,7 +351,7 @@ _dif_generate_split(struct _dif_sgl *sgl, uint32_t offset_in_block, uint32_t dat
 {
 	uint32_t offset_in_dif, buf_len;
 	void *buf;
-	struct spdk_dif dif = {};
+	struct spdk_dif dif = {0};
 
 	assert(offset_in_block < ctx->guard_interval);
 	assert(offset_in_block + data_len < ctx->guard_interval ||
@@ -580,7 +580,7 @@ dif_verify(struct _dif_sgl *sgl, uint32_t num_blocks,
 			guard = spdk_crc16_t10dif(ctx->guard_seed, buf, ctx->guard_interval);
 		}
 
-		rc = _dif_verify(buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
+		rc = _dif_verify((char *)buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
 		if (rc != 0) {
 			return rc;
 		}
@@ -600,7 +600,7 @@ _dif_verify_split(struct _dif_sgl *sgl, uint32_t offset_in_block, uint32_t data_
 	uint32_t offset_in_dif, buf_len;
 	void *buf;
 	uint16_t guard;
-	struct spdk_dif dif = {};
+	struct spdk_dif dif = {0};
 	int rc;
 
 	assert(_guard != NULL);
@@ -809,13 +809,13 @@ dif_generate_copy(struct _dif_sgl *src_sgl, struct _dif_sgl *dst_sgl,
 		guard = 0;
 		if (ctx->dif_flags & SPDK_DIF_FLAGS_GUARD_CHECK) {
 			guard = spdk_crc16_t10dif_copy(ctx->guard_seed, dst, src, data_block_size);
-			guard = spdk_crc16_t10dif(guard, dst + data_block_size,
+			guard = spdk_crc16_t10dif(guard, (char *)dst + data_block_size,
 						  ctx->guard_interval - data_block_size);
 		} else {
 			memcpy(dst, src, data_block_size);
 		}
 
-		_dif_generate(dst + ctx->guard_interval, guard, offset_blocks, ctx);
+		_dif_generate((char *)dst + ctx->guard_interval, guard, offset_blocks, ctx);
 
 		_dif_sgl_advance(src_sgl, data_block_size);
 		_dif_sgl_advance(dst_sgl, ctx->block_size);
@@ -848,10 +848,10 @@ _dif_generate_copy_split(struct _dif_sgl *src_sgl, struct _dif_sgl *dst_sgl,
 		src_len = spdk_min(src_len, data_block_size - offset_in_block);
 
 		if (ctx->dif_flags & SPDK_DIF_FLAGS_GUARD_CHECK) {
-			guard = spdk_crc16_t10dif_copy(guard, dst + offset_in_block,
+			guard = spdk_crc16_t10dif_copy(guard, (unsigned char *)dst + offset_in_block,
 						       src, src_len);
 		} else {
-			memcpy(dst + offset_in_block, src, src_len);
+			memcpy((char *)dst + offset_in_block, src, src_len);
 		}
 
 		_dif_sgl_advance(src_sgl, src_len);
@@ -859,13 +859,13 @@ _dif_generate_copy_split(struct _dif_sgl *src_sgl, struct _dif_sgl *dst_sgl,
 	}
 
 	if (ctx->dif_flags & SPDK_DIF_FLAGS_GUARD_CHECK) {
-		guard = spdk_crc16_t10dif(guard, dst + data_block_size,
+		guard = spdk_crc16_t10dif(guard, (char *)dst + data_block_size,
 					  ctx->guard_interval - data_block_size);
 	}
 
 	_dif_sgl_advance(dst_sgl, ctx->block_size);
 
-	_dif_generate(dst + ctx->guard_interval, guard, offset_blocks, ctx);
+	_dif_generate((char *)dst + ctx->guard_interval, guard, offset_blocks, ctx);
 }
 
 static void
@@ -929,13 +929,13 @@ dif_verify_copy(struct _dif_sgl *src_sgl, struct _dif_sgl *dst_sgl,
 		guard = 0;
 		if (ctx->dif_flags & SPDK_DIF_FLAGS_GUARD_CHECK) {
 			guard = spdk_crc16_t10dif_copy(ctx->guard_seed, dst, src, data_block_size);
-			guard = spdk_crc16_t10dif(guard, src + data_block_size,
+			guard = spdk_crc16_t10dif(guard, (char *)src + data_block_size,
 						  ctx->guard_interval - data_block_size);
 		} else {
 			memcpy(dst, src, data_block_size);
 		}
 
-		rc = _dif_verify(src + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
+		rc = _dif_verify((char *)src + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
 		if (rc != 0) {
 			return rc;
 		}
@@ -975,9 +975,9 @@ _dif_verify_copy_split(struct _dif_sgl *src_sgl, struct _dif_sgl *dst_sgl,
 
 		if (ctx->dif_flags & SPDK_DIF_FLAGS_GUARD_CHECK) {
 			guard = spdk_crc16_t10dif_copy(guard, dst,
-						       src + offset_in_block, dst_len);
+						       (unsigned char *)src + offset_in_block, dst_len);
 		} else {
-			memcpy(dst, src + offset_in_block, dst_len);
+			memcpy(dst, (char *)src + offset_in_block, dst_len);
 		}
 
 		_dif_sgl_advance(dst_sgl, dst_len);
@@ -985,13 +985,13 @@ _dif_verify_copy_split(struct _dif_sgl *src_sgl, struct _dif_sgl *dst_sgl,
 	}
 
 	if (ctx->dif_flags & SPDK_DIF_FLAGS_GUARD_CHECK) {
-		guard = spdk_crc16_t10dif(guard, src + data_block_size,
+		guard = spdk_crc16_t10dif(guard, (char *)src + data_block_size,
 					  ctx->guard_interval - data_block_size);
 	}
 
 	_dif_sgl_advance(src_sgl, ctx->block_size);
 
-	return _dif_verify(src + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
+	return _dif_verify((char *)src + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
 }
 
 static int
@@ -1072,7 +1072,7 @@ _dif_inject_error(struct _dif_sgl *sgl,
 
 		if (inject_offset_bytes >= offset_in_block &&
 		    inject_offset_bytes < offset_in_block + buf_len) {
-			buf += inject_offset_bytes - offset_in_block;
+			buf = (char *)buf + inject_offset_bytes - offset_in_block;
 			_bit_flip(buf, inject_offset_bits);
 			return 0;
 		}
@@ -1093,7 +1093,7 @@ dif_inject_error(struct _dif_sgl *sgl, uint32_t block_size, uint32_t num_blocks,
 	uint32_t offset_blocks;
 	int rc;
 
-	srand(time(0));
+	srand(0);
 
 	inject_offset_blocks = rand() % num_blocks;
 	inject_offset_bytes = start_inject_bytes + (rand() % inject_range_bytes);
@@ -1204,7 +1204,7 @@ dix_generate(struct _dif_sgl *data_sgl, struct _dif_sgl *md_sgl,
 			guard = spdk_crc16_t10dif(guard, md_buf, ctx->guard_interval);
 		}
 
-		_dif_generate(md_buf + ctx->guard_interval, guard, offset_blocks, ctx);
+		_dif_generate((char *)md_buf + ctx->guard_interval, guard, offset_blocks, ctx);
 
 		_dif_sgl_advance(data_sgl, ctx->block_size);
 		_dif_sgl_advance(md_sgl, ctx->md_size);
@@ -1245,7 +1245,7 @@ _dix_generate_split(struct _dif_sgl *data_sgl, struct _dif_sgl *md_sgl,
 
 	_dif_sgl_advance(md_sgl, ctx->md_size);
 
-	_dif_generate(md_buf + ctx->guard_interval, guard, offset_blocks, ctx);
+	_dif_generate((char *)md_buf + ctx->guard_interval, guard, offset_blocks, ctx);
 }
 
 static void
@@ -1307,7 +1307,7 @@ dix_verify(struct _dif_sgl *data_sgl, struct _dif_sgl *md_sgl,
 			guard = spdk_crc16_t10dif(guard, md_buf, ctx->guard_interval);
 		}
 
-		rc = _dif_verify(md_buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
+		rc = _dif_verify((char *)md_buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
 		if (rc != 0) {
 			return rc;
 		}
@@ -1354,7 +1354,7 @@ _dix_verify_split(struct _dif_sgl *data_sgl, struct _dif_sgl *md_sgl,
 
 	_dif_sgl_advance(md_sgl, ctx->md_size);
 
-	return _dif_verify(md_buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
+	return _dif_verify((char *)md_buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
 }
 
 static int

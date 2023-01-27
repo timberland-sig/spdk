@@ -275,7 +275,7 @@ static inline void
 _nvme_tcp_sgl_get_buf(struct _nvme_tcp_sgl *s, void **_buf, uint32_t *_buf_len)
 {
 	if (_buf != NULL) {
-		*_buf = s->iov->iov_base + s->iov_offset;
+		*_buf = (char *)s->iov->iov_base + s->iov_offset;
 	}
 	if (_buf_len != NULL) {
 		*_buf_len = s->iov->iov_len - s->iov_offset;
@@ -483,13 +483,14 @@ nvme_tcp_read_data(struct spdk_sock *sock, int bytes,
 
 		/* For connect reset issue, do not output error log */
 		if (errno != ECONNRESET) {
-			SPDK_ERRLOG("spdk_sock_recv() failed, errno %d: %s\n",
+			SPDK_ERRLOG("spdk_sock_readv() failed, errno %d: %s\n",
 				    errno, spdk_strerror(errno));
 		}
 	}
 
 	/* connection closed */
 	return NVME_TCP_CONNECTION_FATAL;
+
 }
 
 static int

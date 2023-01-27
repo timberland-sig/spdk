@@ -53,6 +53,8 @@ extern "C" {
 
 #define SPDK_CONTAINEROF(ptr, type, member) ((type *)((uintptr_t)ptr - offsetof(type, member)))
 
+#define SPDK_SIZEOF_MEMBER(type, member) (sizeof(((type *)0)->member))
+
 #define SPDK_SEC_TO_USEC 1000000ULL
 #define SPDK_SEC_TO_NSEC 1000000000ULL
 
