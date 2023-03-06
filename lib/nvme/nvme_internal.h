@@ -848,6 +848,13 @@ struct spdk_nvme_probe_ctx {
 	TAILQ_HEAD(, spdk_nvme_ctrlr)		init_ctrlrs;
 };
 
+struct spdk_nvme_fail_trid {
+	struct spdk_nvme_transport_id  trid;
+	LIST_ENTRY                     link;
+};
+extern LIST_ENTRY                   fail_conn;
+void nvme_fabric_insert_fail_trid(struct spdk_nvme_transport_id* trid);
+
 typedef void (*nvme_ctrlr_detach_cb)(struct spdk_nvme_ctrlr *ctrlr);
 
 struct nvme_ctrlr_detach_ctx {
