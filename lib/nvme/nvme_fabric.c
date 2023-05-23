@@ -40,6 +40,9 @@
 #include "spdk/endian.h"
 #include "spdk/string.h"
 
+struct spdk_nvme_fail_trid   *fail_trid;
+LIST_ENTRY                   fail_conn;
+
 static int
 nvme_fabric_prop_set_cmd(struct spdk_nvme_ctrlr *ctrlr,
 			 uint32_t offset, uint8_t size, uint64_t value)
@@ -164,6 +167,18 @@ nvme_fabric_ctrlr_get_reg_8(struct spdk_nvme_ctrlr *ctrlr, uint32_t offset, uint
 	return nvme_fabric_prop_get_cmd(ctrlr, offset, SPDK_NVMF_PROP_SIZE_8, value);
 }
 
+void
+nvme_fabric_insert_fail_trid(struct spdk_nvme_transport_id* trid)
+{
+	struct spdk_nvme_fail_trid   *fail_trid;
+	fail_trid = calloc(1, sizeof(struct spdk_nvme_fail_trid));
+	if (fail_trid == NULL) {
+		SPDK_ERRLOG("Failed to allocate for failed trid info \n");
+	}
+	memcpy(&fail_trid->trid, &trid, sizeof(struct spdk_nvme_transport_id));
+	InsertTailList(&fail_conn, &fail_trid->link);
+}
+
 static void
 nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
 			   struct spdk_nvme_probe_ctx *probe_ctx,
@@ -172,6 +187,7 @@ nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
 	struct spdk_nvme_transport_id trid;
 	uint8_t *end;
 	size_t len;
+	int ret = -1;
 
 	memset(&trid, 0, sizeof(trid));
 
@@ -225,7 +241,11 @@ nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
 	/* Copy the priority from the discovery ctrlr */
 	trid.priority = discover_priority;
 
-	nvme_ctrlr_probe(&trid, probe_ctx, NULL);
+	ret = nvme_ctrlr_probe(&trid, probe_ctx, NULL);
+	if (ret == -1) {
+		/* Inserting failed discovered subsystem info for NBFT */
+		nvme_fabric_insert_fail_trid(&trid);
+	}
 }
 
 static int
