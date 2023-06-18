@@ -13,8 +13,10 @@
 
 #include "spdk/nvme.h"
 
+#ifdef _MSC_VER
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#endif
 #endif
 
 #include "spdk/queue.h"
@@ -175,7 +177,7 @@ extern struct spdk_nvme_transport_opts g_spdk_nvme_transport_opts;
 
 #define SPDK_NVME_TRANSPORT_TOS_DISABLED	(0)
 
-#define MIN_KEEP_ALIVE_TIMEOUT_IN_MS	(10000)
+#define MIN_KEEP_ALIVE_TIMEOUT_IN_MS	(50000)
 
 /* We want to fit submission and completion rings each in a single 2MB
  * hugepage to ensure physical address contiguity.
@@ -1024,6 +1026,13 @@ struct spdk_nvme_probe_ctx {
 	TAILQ_HEAD(, spdk_nvme_ctrlr)		init_ctrlrs;
 };
 
+struct spdk_nvme_fail_trid {
+	struct spdk_nvme_transport_id  trid;
+	LIST_ENTRY                     link;
+};
+extern LIST_ENTRY                   fail_conn;
+void nvme_fabric_insert_fail_trid(struct spdk_nvme_transport_id *trid);
+
 typedef void (*nvme_ctrlr_detach_cb)(struct spdk_nvme_ctrlr *ctrlr);
 
 enum nvme_ctrlr_detach_state {
@@ -1575,4 +1584,5 @@ _is_page_aligned(uint64_t address, uint64_t page_size)
 	return (address & (page_size - 1)) == 0;
 }
 
+int nvme_ctrlr_keep_alive(struct spdk_nvme_ctrlr *ctrlr);
 #endif /* __NVME_INTERNAL_H__ */

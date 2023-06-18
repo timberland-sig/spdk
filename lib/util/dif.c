@@ -575,7 +575,7 @@ dif_generate(struct _dif_sgl *sgl, uint32_t num_blocks, const struct spdk_dif_ct
 			guard = _dif_generate_guard(ctx->guard_seed, buf, ctx->guard_interval, ctx->dif_pi_format);
 		}
 
-		_dif_generate(buf + ctx->guard_interval, guard, offset_blocks, ctx);
+		_dif_generate((char *)buf + ctx->guard_interval, guard, offset_blocks, ctx);
 
 		_dif_sgl_advance(sgl, ctx->block_size);
 		offset_blocks++;
@@ -588,7 +588,7 @@ _dif_generate_split(struct _dif_sgl *sgl, uint32_t offset_in_block, uint32_t dat
 {
 	uint32_t offset_in_dif, buf_len;
 	uint8_t *buf;
-	struct spdk_dif dif = {};
+	struct spdk_dif dif = {0};
 
 	assert(offset_in_block < ctx->guard_interval);
 	assert(offset_in_block + data_len < ctx->guard_interval ||
@@ -821,7 +821,7 @@ dif_verify(struct _dif_sgl *sgl, uint32_t num_blocks,
 			guard = _dif_generate_guard(ctx->guard_seed, buf, ctx->guard_interval, ctx->dif_pi_format);
 		}
 
-		rc = _dif_verify(buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
+		rc = _dif_verify((char *)buf + ctx->guard_interval, guard, offset_blocks, ctx, err_blk);
 		if (rc != 0) {
 			return rc;
 		}
@@ -841,7 +841,7 @@ _dif_verify_split(struct _dif_sgl *sgl, uint32_t offset_in_block, uint32_t data_
 	uint32_t offset_in_dif, buf_len;
 	uint8_t *buf;
 	uint32_t guard;
-	struct spdk_dif dif = {};
+	struct spdk_dif dif = {0};
 	int rc;
 
 	assert(_guard != NULL);
@@ -1054,7 +1054,7 @@ dif_generate_copy(struct _dif_sgl *src_sgl, struct _dif_sgl *dst_sgl,
 			guard = _dif_generate_guard(guard, dst + data_block_size,
 						    ctx->guard_interval - data_block_size, ctx->dif_pi_format);
 		} else {
-			memcpy(dst, src, data_block_size);
+			memcpy((char *)dst, src, data_block_size);
 		}
 
 		_dif_generate(dst + ctx->guard_interval, guard, offset_blocks, ctx);

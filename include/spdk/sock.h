@@ -231,6 +231,11 @@ struct spdk_sock_opts {
 	 * Size of the impl_opts structure.
 	 */
 	size_t impl_opts_size;
+
+	/**
+	 * Additional external context required by socket implementation.
+	 */
+	void *ctx;
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_sock_opts) == 40, "Incorrect size");
 

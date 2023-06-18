@@ -622,11 +622,14 @@ nvme_driver_init(void)
 	nvme_robust_mutex_lock(&g_spdk_nvme_driver->lock);
 
 	g_spdk_nvme_driver->initialized = false;
+#ifdef _MSC_VER
+	g_spdk_nvme_driver->hotplug_fd = -1;
+#else
 	g_spdk_nvme_driver->hotplug_fd = spdk_pci_event_listen();
 	if (g_spdk_nvme_driver->hotplug_fd < 0) {
 		SPDK_DEBUGLOG(nvme, "Failed to open uevent netlink socket\n");
 	}
-
+#endif
 	TAILQ_INIT(&g_spdk_nvme_driver->shared_attached_ctrlrs);
 
 	spdk_uuid_generate(&g_spdk_nvme_driver->default_extended_host_id);
@@ -1033,7 +1036,6 @@ spdk_nvme_trid_populate_transport(struct spdk_nvme_transport_id *trid,
 		break;
 	default:
 		SPDK_ERRLOG("no available transports\n");
-		assert(0);
 		return;
 	}
 	snprintf(trid->trstring, SPDK_NVMF_TRSTRING_MAX_LEN, "%s", trstring);
@@ -1377,8 +1379,8 @@ spdk_nvme_transport_id_compare(const struct spdk_nvme_transport_id *trid1,
 	}
 
 	if (trid1->trtype == SPDK_NVME_TRANSPORT_PCIE) {
-		struct spdk_pci_addr pci_addr1 = {};
-		struct spdk_pci_addr pci_addr2 = {};
+		struct spdk_pci_addr pci_addr1 = {0};
+		struct spdk_pci_addr pci_addr2 = {0};
 
 		/* Normalize PCI addresses before comparing */
 		if (spdk_pci_addr_parse(&pci_addr1, trid1->traddr) < 0 ||
