@@ -219,6 +219,10 @@ spdk_nvme_ctrlr_get_default_ctrlr_opts(struct spdk_nvme_ctrlr_opts *opts, size_t
 		memset(opts->src_svcid, 0, sizeof(opts->src_svcid));
 	}
 
+	if (FIELD_OK(sock_ctx)) {
+		opts->sock_ctx = NULL;
+	}
+
 	if (FIELD_OK(host_id)) {
 		memset(opts->host_id, 0, sizeof(opts->host_id));
 	}
@@ -401,6 +405,8 @@ nvme_ctrlr_create_io_qpair(struct spdk_nvme_ctrlr *ctrlr,
 		return NULL;
 	}
 
+	NVME_CTRLR_INFOLOG(ctrlr, "num_io_queues %d\n",  ctrlr->opts.num_io_queues);
+
 	TAILQ_INSERT_TAIL(&ctrlr->active_io_qpairs, qpair, tailq);
 
 	nvme_ctrlr_proc_add_io_qpair(qpair);
@@ -426,6 +432,8 @@ spdk_nvme_ctrlr_connect_io_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme
 	if (ctrlr->quirks & NVME_QUIRK_DELAY_AFTER_QUEUE_ALLOC) {
 		spdk_delay_us(100);
 	}
+
+	NVME_CTRLR_INFOLOG(ctrlr, "num_io_queues %d\n",  ctrlr->opts.num_io_queues);
 
 	return rc;
 }
@@ -1599,7 +1607,7 @@ void
 nvme_ctrlr_abort_queued_aborts(struct spdk_nvme_ctrlr *ctrlr)
 {
 	struct nvme_request	*req, *tmp;
-	struct spdk_nvme_cpl	cpl = {};
+	struct spdk_nvme_cpl	cpl = {0};
 
 	cpl.status.sc = SPDK_NVME_SC_ABORTED_SQ_DELETION;
 	cpl.status.sct = SPDK_NVME_SCT_GENERIC;
@@ -4262,7 +4270,7 @@ nvme_keep_alive_completion(void *cb_ctx, const struct spdk_nvme_cpl *cpl)
  * Check if we need to send a Keep Alive command.
  * Caller must hold ctrlr->ctrlr_lock.
  */
-static int
+int
 nvme_ctrlr_keep_alive(struct spdk_nvme_ctrlr *ctrlr)
 {
 	uint64_t now;
