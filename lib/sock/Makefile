@@ -14,7 +14,7 @@ C_SRCS = sock.c sock_rpc.c
 
 LIBNAME = sock
 
-CFLAGS += -Wpointer-arith
+CFLAGS += -Wpointer-arith -Wno-unused-function
 
 SPDK_MAP_FILE = $(abspath $(CURDIR)/spdk_sock.map)
 

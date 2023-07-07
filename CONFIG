@@ -120,10 +120,10 @@ CONFIG_DAOS_DIR=
 CONFIG_UBLK=n
 
 # Build vhost library.
-CONFIG_VHOST=y
+CONFIG_VHOST=n
 
 # Build vhost initiator (Virtio) driver.
-CONFIG_VIRTIO=y
+CONFIG_VIRTIO=n
 
 # Build custom vfio-user transport for NVMf target and NVMe initiator.
 CONFIG_VFIO_USER=n

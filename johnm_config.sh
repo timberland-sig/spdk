@@ -1,0 +1,2 @@
+./configure --enable-debug --without-idxd --without-crypto --without-fio  --without-xnvme --without-vhost --without-virtio --without-vfio-user --without-vbdev-compress --without-dpdk-compressdev --without-rbd --without-ublk --without-rdma --without-fc --without-daos --without-shared --without-iscsi-initiator --without-vtune --without-ocf --without-uring-zns --without-fuse --without-nvme-cuse --without-raid5f --without-wpdk --without-usdt --without-sma --without-avahi
+
