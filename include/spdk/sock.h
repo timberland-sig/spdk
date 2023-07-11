@@ -242,7 +242,7 @@ struct spdk_sock_opts {
 	 */
 	void *ctx;
 };
-SPDK_STATIC_ASSERT(sizeof(struct spdk_sock_opts) == 40, "Incorrect size");
+SPDK_STATIC_ASSERT(sizeof(struct spdk_sock_opts) == 48, "Incorrect size");
 
 /**
  * Initialize the default value of opts.
