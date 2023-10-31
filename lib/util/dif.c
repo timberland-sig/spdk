@@ -883,7 +883,6 @@ _dif_verify_split(struct _dif_sgl *sgl, uint32_t offset_in_block, uint32_t data_
 	uint8_t *buf;
 	uint64_t guard;
 	struct spdk_dif dif = {0};
-	uint32_t guard;
 	int rc;
 
 	assert(_guard != NULL);
