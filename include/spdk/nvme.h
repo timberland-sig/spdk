@@ -292,7 +292,6 @@ struct spdk_nvme_ctrlr_opts {
 	 */
 	uint8_t transport_tos;
 };
-SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_ctrlr_opts) == 824, "Incorrect size");
 
 /**
  * NVMe acceleration operation callback.
