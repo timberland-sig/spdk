@@ -2005,6 +2005,8 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped, uint32_t max_
 		/* Wait for the pdu specific header  */
 		case NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_PSH:
 			assert(pdu->psh_valid_bytes < pdu->psh_len);
+			SPDK_DEBUGLOG(nvme, "Read Protocol Specific Header. psh_valid_bytes: %d tqpair:%p\n",
+				      pdu->psh_valid_bytes, tqpair);
 			rc = nvme_tcp_read_data(tqpair->sock,
 						pdu->psh_len - pdu->psh_valid_bytes,
 						(uint8_t *)&pdu->hdr.raw + sizeof(struct spdk_nvme_tcp_common_pdu_hdr) + pdu->psh_valid_bytes);
@@ -2023,6 +2025,7 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped, uint32_t max_
 			break;
 		case NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_PAYLOAD:
 			/* check whether the data is valid, if not we just return */
+			SPDK_DEBUGLOG(nvme, "Read Payload Data\n");
 			if (!pdu->data_len) {
 				return NVME_TCP_PDU_IN_PROGRESS;
 			}
@@ -2060,6 +2063,7 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped, uint32_t max_
 			}
 			break;
 		case NVME_TCP_PDU_RECV_STATE_ERROR:
+			SPDK_ERRLOG("PDU receive start ERROR\n");
 			memset(pdu, 0, sizeof(struct nvme_tcp_pdu));
 			return NVME_TCP_PDU_FATAL;
 		default:
@@ -2316,6 +2320,8 @@ nvme_tcp_qpair_connect_sock(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpai
 	spdk_sock_get_default_opts(&opts);
 	opts.priority = ctrlr->trid.priority;
 	opts.zcopy = !nvme_qpair_is_admin_queue(qpair);
+	opts.ctx = ctrlr->opts.sock_ctx;
+
 	if (ctrlr->opts.transport_ack_timeout) {
 		opts.ack_timeout = 1ULL << ctrlr->opts.transport_ack_timeout;
 	}
@@ -2589,6 +2595,8 @@ nvme_tcp_ctrlr_construct(const struct spdk_nvme_transport_id *trid,
 {
 	struct nvme_tcp_ctrlr *tctrlr;
 	int rc;
+
+	SPDK_DEBUGLOG(nvme, "nvme_tcp_ctrlr_construct Entered\n");
 
 	tctrlr = calloc(1, sizeof(*tctrlr));
 	if (tctrlr == NULL) {
