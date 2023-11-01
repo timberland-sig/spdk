@@ -20,8 +20,10 @@ struct nvme_fabric_prop_ctx {
 	void			*cb_arg;
 };
 
+#ifdef _MSC_VER
 struct spdk_nvme_fail_trid   *fail_trid;
 LIST_ENTRY                   fail_conn;
+#endif
 
 static int
 nvme_fabric_prop_set_cmd(struct spdk_nvme_ctrlr *ctrlr,
@@ -282,6 +284,7 @@ nvme_fabric_ctrlr_get_reg_8_async(struct spdk_nvme_ctrlr *ctrlr, uint32_t offset
 	return nvme_fabric_prop_get_cmd_async(ctrlr, offset, SPDK_NVMF_PROP_SIZE_8, cb_fn, cb_arg);
 }
 
+#ifdef _MSC_VER
 void
 nvme_fabric_insert_fail_trid(struct spdk_nvme_transport_id *trid)
 {
@@ -293,6 +296,7 @@ nvme_fabric_insert_fail_trid(struct spdk_nvme_transport_id *trid)
 	memcpy(&fail_trid->trid, &trid, sizeof(struct spdk_nvme_transport_id));
 	InsertTailList(&fail_conn, &fail_trid->link);
 }
+#endif
 
 static void
 nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
@@ -357,11 +361,13 @@ nvme_fabric_discover_probe(struct spdk_nvmf_discovery_log_page_entry *entry,
 	/* Copy the priority from the discovery ctrlr */
 	trid.priority = discover_priority;
 
+#ifdef _MSC_VER
 	rc = nvme_ctrlr_probe(&trid, probe_ctx, NULL);
 	if (rc == -1) {
 		/* Inserting failed discovered subsystem info for NBFT */
 		nvme_fabric_insert_fail_trid(&trid);
 	}
+#endif
 }
 
 static int
