@@ -13,8 +13,10 @@
 
 #include "spdk/nvme.h"
 
+#ifdef _MSC_VER
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#endif
 #endif
 
 #include "spdk/queue.h"
