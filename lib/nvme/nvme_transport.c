@@ -124,7 +124,7 @@ nvme_transport_ctrlr_scan(struct spdk_nvme_probe_ctx *probe_ctx,
 		return -ENOENT;
 	}
 
-	SPDK_INFOLOG(nvme, "trid trstring %a\n", probe_ctx->trid.trstring);
+	SPDK_INFOLOG(nvme, "trid trstring %s\n", probe_ctx->trid.trstring);
 	return transport->ops.ctrlr_scan(probe_ctx, direct_connect);
 }
 
