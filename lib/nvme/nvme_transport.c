@@ -22,7 +22,7 @@ struct spdk_nvme_transport {
 TAILQ_HEAD(nvme_transport_list, spdk_nvme_transport) g_spdk_nvme_transports =
 	TAILQ_HEAD_INITIALIZER(g_spdk_nvme_transports);
 
-struct spdk_nvme_transport g_spdk_transports[SPDK_MAX_NUM_OF_TRANSPORTS] = {};
+struct spdk_nvme_transport g_spdk_transports[SPDK_MAX_NUM_OF_TRANSPORTS] = {0};
 int g_current_transport_index = 0;
 
 struct spdk_nvme_transport_opts g_spdk_nvme_transport_opts = {
@@ -124,6 +124,7 @@ nvme_transport_ctrlr_scan(struct spdk_nvme_probe_ctx *probe_ctx,
 		return -ENOENT;
 	}
 
+	SPDK_INFOLOG(nvme, "trid trstring %s\n", probe_ctx->trid.trstring);
 	return transport->ops.ctrlr_scan(probe_ctx, direct_connect);
 }
 

@@ -887,7 +887,7 @@ nvme_qpair_init(struct spdk_nvme_qpair *qpair, uint16_t id,
 	}
 
 	for (i = 0; i < num_requests; i++) {
-		req = (void *)((uintptr_t)qpair->req_buf + i * req_size_padded);
+		req = (struct nvme_request *)((uintptr_t *)qpair->req_buf + i * req_size_padded);
 
 		req->qpair = qpair;
 		if (i == 0) {
