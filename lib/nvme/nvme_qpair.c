@@ -1063,7 +1063,7 @@ nvme_qpair_init (
   }
 
   for (i = 0; i < num_requests; i++) {
-    struct nvme_request  *req = qpair->req_buf + i * req_size_padded;
+    struct nvme_request  *req = (struct nvme_request *)((char *)qpair->req_buf + i * req_size_padded);
 
     req->qpair = qpair;
     if (i == 0) {
@@ -1360,11 +1360,13 @@ spdk_nvme_qpair_add_cmd_error_injection (
   )
 {
   struct nvme_error_cmd  *entry, *cmd = NULL;
-  int                    rc = 0;
+  int                    rc     = 0;
+  bool                   locked = false;
 
   if (qpair == NULL) {
     qpair = ctrlr->adminq;
     nvme_robust_mutex_lock (&ctrlr->ctrlr_lock);
+    locked = true;
   }
 
   TAILQ_FOREACH (entry, &qpair->err_cmd_head, link) {
@@ -1391,7 +1393,7 @@ spdk_nvme_qpair_add_cmd_error_injection (
   cmd->status.sct    = sct;
   cmd->status.sc     = sc;
 out:
-  if (nvme_qpair_is_admin_queue (qpair)) {
+  if (nvme_qpair_is_admin_queue (qpair) || (locked == true)) {
     nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
   }
 
@@ -1406,10 +1408,12 @@ spdk_nvme_qpair_remove_cmd_error_injection (
   )
 {
   struct nvme_error_cmd  *cmd, *entry;
+  bool                   locked = false;
 
   if (qpair == NULL) {
     qpair = ctrlr->adminq;
     nvme_robust_mutex_lock (&ctrlr->ctrlr_lock);
+    locked = true;
   }
 
   TAILQ_FOREACH_SAFE (cmd, &qpair->err_cmd_head, link, entry) {
@@ -1420,7 +1424,7 @@ spdk_nvme_qpair_remove_cmd_error_injection (
     }
   }
 
-  if (nvme_qpair_is_admin_queue (qpair)) {
+  if (nvme_qpair_is_admin_queue (qpair) || (locked == true)) {
     nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
   }
 }

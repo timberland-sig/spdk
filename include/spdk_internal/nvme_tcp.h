@@ -10,7 +10,7 @@
 #include "spdk/sock.h"
 #include "spdk/dif.h"
 
-#include "sgl.h"
+#include "spdk_internal/sgl.h"
 
 #define SPDK_CRC32C_XOR                         0xffffffffUL
 #define SPDK_NVME_TCP_DIGEST_LEN                4
@@ -228,7 +228,8 @@ _nvme_tcp_sgl_get_buf (
   )
 {
   if (_buf != NULL) {
-    *_buf = s->iov->iov_base + s->iov_offset;
+    *_buf = (char *)s->iov->iov_base + s->iov_offset;
+    // *_buf = s->iov->iov_base + s->iov_offset;
   }
 
   if (_buf_len != NULL) {
@@ -448,9 +449,18 @@ nvme_tcp_read_data (
   void              *buf
   )
 {
-  int  ret;
+  int      ret;
+  ssize_t  bytes_read = 0;
 
-  ret = spdk_sock_recv (sock, buf, bytes);
+  bytes_read = spdk_sock_recv (sock, buf, bytes);
+
+  //
+  // Check for integer overflow before proceeding.
+  //
+  ret = (int)bytes_read;
+  if (ret != bytes_read) {
+    return NVME_TCP_CONNECTION_FATAL;
+  }
 
   if (ret > 0) {
     return ret;
@@ -482,7 +492,8 @@ nvme_tcp_readv_data (
   int               iovcnt
   )
 {
-  int  ret;
+  int      ret;
+  ssize_t  bytes_read = 0;
 
   assert (sock != NULL);
   if ((iov == NULL) || (iovcnt == 0)) {
@@ -493,7 +504,15 @@ nvme_tcp_readv_data (
     return nvme_tcp_read_data (sock, iov->iov_len, iov->iov_base);
   }
 
-  ret = spdk_sock_readv (sock, iov, iovcnt);
+  bytes_read = spdk_sock_readv (sock, iov, iovcnt);
+
+  //
+  // Check for integer overflow before proceeding.
+  //
+  ret = (int)bytes_read;
+  if (ret != bytes_read) {
+    return NVME_TCP_CONNECTION_FATAL;
+  }
 
   if (ret > 0) {
     return ret;
@@ -571,7 +590,9 @@ nvme_tcp_pdu_set_data_buf (
   uint32_t             data_len
   )
 {
-  uint32_t             buf_offset, buf_len, remain_len, len;
+  uint32_t             buf_offset = 0;
+  uint32_t             buf_len = 0;
+  uint32_t             remain_len, len;
   uint8_t              *buf;
   struct spdk_iov_sgl  *pdu_sgl, buf_sgl;
 

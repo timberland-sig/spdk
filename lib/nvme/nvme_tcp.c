@@ -1,3 +1,11 @@
+/** @file
+  nvme_tcp.c - Shim module changes on SPDK source for EDK2 NVMe/TCP transport.
+
+Copyright (c) 2024, Dell Inc. or its subsidiaries. All Rights Reserved.<BR>
+SPDX-License-Identifier: BSD-2-Clause-Patent
+
+**/
+
 /*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (C) 2018 Intel Corporation. All rights reserved.
  *   Copyright (c) 2020 Mellanox Technologies LTD. All rights reserved.
@@ -8,24 +16,8 @@
  * NVMe/TCP transport
  */
 
-#include "nvme_internal.h"
+#include "edk_nvme_tcp.h"
 
-#include "spdk/endian.h"
-#include "spdk/likely.h"
-#include "spdk/string.h"
-#include "spdk/stdinc.h"
-#include "spdk/crc32.h"
-#include "spdk/endian.h"
-#include "spdk/assert.h"
-#include "spdk/string.h"
-#include "spdk/thread.h"
-#include "spdk/trace.h"
-#include "spdk/util.h"
-
-#include "spdk_internal/nvme_tcp.h"
-#include "spdk_internal/trace_defs.h"
-
-#define NVME_TCP_RW_BUFFER_SIZE       131072
 #define NVME_TCP_TIME_OUT_IN_SECONDS  2
 
 #define NVME_TCP_HPDA_DEFAULT           0
@@ -40,6 +32,16 @@
 /* NVMe TCP transport extensions for spdk_nvme_ctrlr */
 struct nvme_tcp_ctrlr {
   struct spdk_nvme_ctrlr    ctrlr;
+};
+
+struct edk_nvme_tcp_ctrlr {
+  struct spdk_nvme_ctrlr    ctrlr;
+  //
+  // Additional context for socket creation.
+  // In UEFI use case, this field allows to provide additional information
+  // required for TcpIo instance creation.
+  //
+  void                      *edk_sock_ctx;
 };
 
 struct nvme_tcp_poll_group {
@@ -149,19 +151,9 @@ struct nvme_tcp_req {
   struct spdk_nvme_cpl     rsp;
 };
 
-static struct spdk_nvme_tcp_stat  g_dummy_stats = { };
-
 static void
 nvme_tcp_send_h2c_data (
   struct nvme_tcp_req  *tcp_req
-  );
-
-static int64_t
-nvme_tcp_poll_group_process_completions (
-  struct spdk_nvme_transport_poll_group
-                                   *tgroup,
-  uint32_t                         completions_per_qpair,
-  spdk_nvme_disconnected_qpair_cb  disconnected_qpair_cb
   );
 
 static void
@@ -202,6 +194,15 @@ nvme_tcp_ctrlr (
 {
   assert (ctrlr->trid.trtype == SPDK_NVME_TRANSPORT_TCP);
   return SPDK_CONTAINEROF (ctrlr, struct nvme_tcp_ctrlr, ctrlr);
+}
+
+static inline struct edk_nvme_tcp_ctrlr *
+edk_nvme_tcp_ctrlr (
+  struct spdk_nvme_ctrlr  *ctrlr
+  )
+{
+  assert (ctrlr->trid.trtype == SPDK_NVME_TRANSPORT_TCP);
+  return SPDK_CONTAINEROF (ctrlr, struct edk_nvme_tcp_ctrlr, ctrlr);
 }
 
 static struct nvme_tcp_req *
@@ -602,7 +603,7 @@ nvme_tcp_build_contig_request (
 {
   struct nvme_request  *req = tcp_req->req;
 
-  tcp_req->iov[0].iov_base = req->payload.contig_or_cb_arg + req->payload_offset;
+  tcp_req->iov[0].iov_base = (char *)req->payload.contig_or_cb_arg + req->payload_offset;
   tcp_req->iov[0].iov_len  = req->payload_size;
   tcp_req->iovcnt          = 1;
 
@@ -864,18 +865,6 @@ nvme_tcp_qpair_submit_request (
     return -1;
   }
 
-  spdk_trace_record (
-    TRACE_NVME_TCP_SUBMIT,
-    qpair->id,
-    0,
-    (uintptr_t)req,
-    req->cb_arg,
-    (uint32_t)req->cmd.cid,
-    (uint32_t)req->cmd.opc,
-    req->cmd.cdw10,
-    req->cmd.cdw11,
-    req->cmd.cdw12
-    );
   TAILQ_INSERT_TAIL (&tqpair->outstanding_reqs, tcp_req, link);
   return nvme_tcp_qpair_capsule_cmd_send (tqpair, tcp_req);
 }
@@ -923,15 +912,6 @@ nvme_tcp_req_complete (
     spdk_nvme_qpair_print_completion (qpair, rsp);
   }
 
-  spdk_trace_record (
-    TRACE_NVME_TCP_COMPLETE,
-    qpair->id,
-    0,
-    (uintptr_t)req,
-    req->cb_arg,
-    (uint32_t)req->cmd.cid,
-    (uint32_t)cpl.status_raw
-    );
   TAILQ_REMOVE (&tcp_req->tqpair->outstanding_reqs, tcp_req, link);
   nvme_tcp_req_put (tqpair, tcp_req);
   nvme_free_request (req);
@@ -945,7 +925,7 @@ nvme_tcp_qpair_abort_reqs (
   )
 {
   struct nvme_tcp_req    *tcp_req, *tmp;
-  struct spdk_nvme_cpl   cpl     = { };
+  struct spdk_nvme_cpl   cpl     = { 0 };
   struct nvme_tcp_qpair  *tqpair = nvme_tcp_qpair (qpair);
 
   cpl.sqid       = qpair->id;
@@ -1304,7 +1284,7 @@ tcp_data_recv_crc32_done (
   }
 
 end:
-  nvme_tcp_c2h_data_payload_handle (tqpair, tcp_req->pdu, &dummy_reaped);
+  nvme_tcp_c2h_data_payload_handle (tqpair, tcp_req->pdu, (uint32_t *)&dummy_reaped);
 }
 
 static void
@@ -1342,8 +1322,20 @@ nvme_tcp_pdu_payload_handle (
     {
       tcp_req->pdu->hdr = pdu->hdr;
       tcp_req->pdu->req = tcp_req;
-      memcpy (tcp_req->pdu->data_digest, pdu->data_digest, sizeof (pdu->data_digest));
-      memcpy (tcp_req->pdu->data_iov, pdu->data_iov, sizeof (pdu->data_iov[0]) * pdu->data_iovcnt);
+      if (sizeof (pdu->data_digest) <= sizeof (tcp_req->pdu->data_digest)) {
+        memcpy (tcp_req->pdu->data_digest, pdu->data_digest, sizeof (pdu->data_digest));
+      } else {
+        SPDK_ERRLOG ("memory overflow error on tqpair=(%p) with pdu=%p\n", tqpair, pdu);
+        memcpy (tcp_req->pdu->data_digest, pdu->data_digest, sizeof (tcp_req->pdu->data_digest));
+      }
+
+      if ((sizeof (pdu->data_iov[0]) * pdu->data_iovcnt) <= sizeof (tcp_req->pdu->data_iov)) {
+        memcpy (tcp_req->pdu->data_iov, pdu->data_iov, sizeof (pdu->data_iov[0]) * pdu->data_iovcnt);
+      } else {
+        SPDK_ERRLOG ("memory overflow error on tqpair=(%p) with pdu=%p\n", tqpair, pdu);
+        memcpy (tcp_req->pdu->data_iov, pdu->data_iov, sizeof (tcp_req->pdu->data_iov));
+      }
+
       tcp_req->pdu->data_iovcnt = pdu->data_iovcnt;
       tcp_req->pdu->data_len    = pdu->data_len;
 
@@ -2136,33 +2128,6 @@ fail:
   return -ENXIO;
 }
 
-static void
-nvme_tcp_qpair_sock_cb (
-  void                    *ctx,
-  struct spdk_sock_group  *group,
-  struct spdk_sock        *sock
-  )
-{
-  struct spdk_nvme_qpair      *qpair  = ctx;
-  struct nvme_tcp_poll_group  *pgroup = nvme_tcp_poll_group (qpair->poll_group);
-  int32_t                     num_completions;
-  struct nvme_tcp_qpair       *tqpair = nvme_tcp_qpair (qpair);
-
-  if (tqpair->needs_poll) {
-    TAILQ_REMOVE (&pgroup->needs_poll, tqpair, link);
-    tqpair->needs_poll = false;
-  }
-
-  num_completions = spdk_nvme_qpair_process_completions (qpair, pgroup->completions_per_qpair);
-
-  if ((pgroup->num_completions >= 0) && (num_completions >= 0)) {
-    pgroup->num_completions        += num_completions;
-    pgroup->stats.nvme_completions += num_completions;
-  } else {
-    pgroup->num_completions = -ENXIO;
-  }
-}
-
 static int
 nvme_tcp_qpair_icreq_send (
   struct nvme_tcp_qpair  *tqpair
@@ -2191,7 +2156,7 @@ nvme_tcp_qpair_icreq_send (
 }
 
 static int
-nvme_tcp_qpair_connect_sock (
+edk_nvme_tcp_qpair_connect_sock (
   struct spdk_nvme_ctrlr  *ctrlr,
   struct spdk_nvme_qpair  *qpair
   )
@@ -2206,8 +2171,11 @@ nvme_tcp_qpair_connect_sock (
   struct spdk_sock_impl_opts  impl_opts;
   size_t                      impl_opts_size = sizeof (impl_opts);
   struct spdk_sock_opts       opts;
+  struct edk_spdk_sock_opts   edk_sock_opts;
+  struct edk_nvme_tcp_ctrlr   *edk_trctrlr = edk_nvme_tcp_ctrlr (ctrlr);
 
-  tqpair = nvme_tcp_qpair (qpair);
+  tqpair             = nvme_tcp_qpair (qpair);
+  edk_sock_opts.base = &opts;
 
   switch (ctrlr->trid.adrfam) {
     case SPDK_NVMF_ADRFAM_IPV4:
@@ -2264,6 +2232,9 @@ nvme_tcp_qpair_connect_sock (
   spdk_sock_get_default_opts (&opts);
   opts.priority = ctrlr->trid.priority;
   opts.zcopy    = !nvme_qpair_is_admin_queue (qpair);
+
+  edk_sock_opts.ctx = edk_trctrlr->edk_sock_ctx;
+
   if (ctrlr->opts.transport_ack_timeout) {
     opts.ack_timeout = 1ULL << ctrlr->opts.transport_ack_timeout;
   }
@@ -2273,7 +2244,7 @@ nvme_tcp_qpair_connect_sock (
     opts.impl_opts_size = sizeof (impl_opts);
   }
 
-  tqpair->sock = spdk_sock_connect_ext (ctrlr->trid.traddr, port, sock_impl_name, &opts);
+  tqpair->sock = edk_spdk_sock_connect_ext (ctrlr->trid.traddr, port, sock_impl_name, (struct spdk_sock_opts *)&edk_sock_opts);
   if (!tqpair->sock) {
     SPDK_ERRLOG (
       "sock connection error of tqpair=%p with addr=%s, port=%ld\n",
@@ -2366,7 +2337,7 @@ nvme_tcp_ctrlr_connect_qpair (
   tqpair = nvme_tcp_qpair (qpair);
 
   if (!tqpair->sock) {
-    rc = nvme_tcp_qpair_connect_sock (ctrlr, qpair);
+    rc = edk_nvme_tcp_qpair_connect_sock (ctrlr, qpair);
     if (rc < 0) {
       return rc;
     }
@@ -2455,7 +2426,7 @@ nvme_tcp_ctrlr_create_qpair (
 
   /* spdk_nvme_qpair_get_optimal_poll_group needs socket information.
    * So create the socket first when creating a qpair. */
-  rc = nvme_tcp_qpair_connect_sock (ctrlr, qpair);
+  rc = edk_nvme_tcp_qpair_connect_sock (ctrlr, qpair);
   if (rc) {
     nvme_tcp_ctrlr_delete_io_qpair (ctrlr, qpair);
     return NULL;
@@ -2485,14 +2456,16 @@ nvme_tcp_ctrlr_create_io_qpair (
 typedef struct spdk_nvme_ctrlr spdk_nvme_ctrlr_t;
 
 static spdk_nvme_ctrlr_t *
-nvme_tcp_ctrlr_construct (
+edk_nvme_tcp_ctrlr_construct (
   const struct spdk_nvme_transport_id  *trid,
   const struct spdk_nvme_ctrlr_opts    *opts,
   void                                 *devhandle
   )
 {
-  struct nvme_tcp_ctrlr  *tctrlr;
-  int                    rc;
+  struct edk_nvme_tcp_ctrlr        *tctrlr;
+  struct edk_spdk_nvme_ctrlr_opts  *edk_opts  = __edk_opts (opts);
+  struct spdk_nvme_ctrlr_opts      *spdk_opts = __spdk_opts (edk_opts);
+  int                              rc;
 
   tctrlr = calloc (1, sizeof (*tctrlr));
   if (tctrlr == NULL) {
@@ -2500,10 +2473,11 @@ nvme_tcp_ctrlr_construct (
     return NULL;
   }
 
-  tctrlr->ctrlr.opts = *opts;
-  tctrlr->ctrlr.trid = *trid;
+  tctrlr->edk_sock_ctx = edk_opts->sock_ctx;
+  tctrlr->ctrlr.opts   = *spdk_opts;
+  tctrlr->ctrlr.trid   = *trid;
 
-  if (opts->transport_ack_timeout > NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT) {
+  if (spdk_opts->transport_ack_timeout > NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT) {
     SPDK_NOTICELOG (
       "transport_ack_timeout exceeds max value %d, use max value\n",
       NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT
@@ -2588,7 +2562,7 @@ nvme_tcp_admin_qpair_abort_aers (
   )
 {
   struct nvme_tcp_req    *tcp_req, *tmp;
-  struct spdk_nvme_cpl   cpl     = { };
+  struct spdk_nvme_cpl   cpl     = { 0 };
   struct nvme_tcp_qpair  *tqpair = nvme_tcp_qpair (qpair);
 
   cpl.status.sc  = SPDK_NVME_SC_ABORTED_SQ_DELETION;
@@ -2604,240 +2578,14 @@ nvme_tcp_admin_qpair_abort_aers (
   }
 }
 
-static struct spdk_nvme_transport_poll_group *
-nvme_tcp_poll_group_create (
-  void
-  )
-{
-  struct nvme_tcp_poll_group  *group = calloc (1, sizeof (*group));
-
-  if (group == NULL) {
-    SPDK_ERRLOG ("Unable to allocate poll group.\n");
-    return NULL;
-  }
-
-  TAILQ_INIT (&group->needs_poll);
-
-  group->sock_group = spdk_sock_group_create (group);
-  if (group->sock_group == NULL) {
-    free (group);
-    SPDK_ERRLOG ("Unable to allocate sock group.\n");
-    return NULL;
-  }
-
-  return &group->group;
-}
-
-static struct spdk_nvme_transport_poll_group *
-nvme_tcp_qpair_get_optimal_poll_group (
-  struct spdk_nvme_qpair  *qpair
-  )
-{
-  struct nvme_tcp_qpair   *tqpair = nvme_tcp_qpair (qpair);
-  struct spdk_sock_group  *group  = NULL;
-  int                     rc;
-
-  rc = spdk_sock_get_optimal_sock_group (tqpair->sock, &group, NULL);
-  if (!rc && (group != NULL)) {
-    return spdk_sock_group_get_ctx (group);
-  }
-
-  return NULL;
-}
-
-static int
-nvme_tcp_poll_group_connect_qpair (
-  struct spdk_nvme_qpair  *qpair
-  )
-{
-  struct nvme_tcp_poll_group  *group  = nvme_tcp_poll_group (qpair->poll_group);
-  struct nvme_tcp_qpair       *tqpair = nvme_tcp_qpair (qpair);
-
-  if (spdk_sock_group_add_sock (group->sock_group, tqpair->sock, nvme_tcp_qpair_sock_cb, qpair)) {
-    return -EPROTO;
-  }
-
-  return 0;
-}
-
-static int
-nvme_tcp_poll_group_disconnect_qpair (
-  struct spdk_nvme_qpair  *qpair
-  )
-{
-  struct nvme_tcp_poll_group  *group  = nvme_tcp_poll_group (qpair->poll_group);
-  struct nvme_tcp_qpair       *tqpair = nvme_tcp_qpair (qpair);
-
-  if (tqpair->needs_poll) {
-    TAILQ_REMOVE (&group->needs_poll, tqpair, link);
-    tqpair->needs_poll = false;
-  }
-
-  if (tqpair->sock && group->sock_group) {
-    if (spdk_sock_group_remove_sock (group->sock_group, tqpair->sock)) {
-      return -EPROTO;
-    }
-  }
-
-  return 0;
-}
-
-static int
-nvme_tcp_poll_group_add (
-  struct spdk_nvme_transport_poll_group  *tgroup,
-  struct spdk_nvme_qpair                 *qpair
-  )
-{
-  struct nvme_tcp_qpair       *tqpair = nvme_tcp_qpair (qpair);
-  struct nvme_tcp_poll_group  *group  = nvme_tcp_poll_group (tgroup);
-
-  /* disconnected qpairs won't have a sock to add. */
-  if (nvme_qpair_get_state (qpair) >= NVME_QPAIR_CONNECTED) {
-    if (spdk_sock_group_add_sock (group->sock_group, tqpair->sock, nvme_tcp_qpair_sock_cb, qpair)) {
-      return -EPROTO;
-    }
-  }
-
-  return 0;
-}
-
-static int
-nvme_tcp_poll_group_remove (
-  struct spdk_nvme_transport_poll_group  *tgroup,
-  struct spdk_nvme_qpair                 *qpair
-  )
-{
-  struct nvme_tcp_qpair       *tqpair;
-  struct nvme_tcp_poll_group  *group;
-
-  assert (qpair->poll_group_tailq_head == &tgroup->disconnected_qpairs);
-
-  tqpair = nvme_tcp_qpair (qpair);
-  group  = nvme_tcp_poll_group (tgroup);
-
-  assert (tqpair->shared_stats == true);
-  tqpair->stats = &g_dummy_stats;
-
-  if (tqpair->needs_poll) {
-    TAILQ_REMOVE (&group->needs_poll, tqpair, link);
-    tqpair->needs_poll = false;
-  }
-
-  return 0;
-}
-
-static int64_t
-nvme_tcp_poll_group_process_completions (
-  struct spdk_nvme_transport_poll_group  *tgroup,
-  uint32_t                               completions_per_qpair,
-  spdk_nvme_disconnected_qpair_cb        disconnected_qpair_cb
-  )
-{
-  struct nvme_tcp_poll_group  *group = nvme_tcp_poll_group (tgroup);
-  struct spdk_nvme_qpair      *qpair, *tmp_qpair;
-  struct nvme_tcp_qpair       *tqpair, *tmp_tqpair;
-  int                         num_events;
-
-  group->completions_per_qpair = completions_per_qpair;
-  group->num_completions       = 0;
-  group->stats.polls++;
-
-  num_events = spdk_sock_group_poll (group->sock_group);
-
-  STAILQ_FOREACH_SAFE (qpair, &tgroup->disconnected_qpairs, poll_group_stailq, tmp_qpair) {
-    disconnected_qpair_cb (qpair, tgroup->group->ctx);
-  }
-
-  /* If any qpairs were marked as needing to be polled due to an asynchronous write completion
-   * and they weren't polled as a consequence of calling spdk_sock_group_poll above, poll them now. */
-  TAILQ_FOREACH_SAFE (tqpair, &group->needs_poll, link, tmp_tqpair) {
-    nvme_tcp_qpair_sock_cb (&tqpair->qpair, group->sock_group, tqpair->sock);
-  }
-
-  if (spdk_unlikely (num_events < 0)) {
-    return num_events;
-  }
-
-  group->stats.idle_polls         += !num_events;
-  group->stats.socket_completions += num_events;
-
-  return group->num_completions;
-}
-
-static int
-nvme_tcp_poll_group_destroy (
-  struct spdk_nvme_transport_poll_group  *tgroup
-  )
-{
-  int                         rc;
-  struct nvme_tcp_poll_group  *group = nvme_tcp_poll_group (tgroup);
-
-  if (!STAILQ_EMPTY (&tgroup->connected_qpairs) || !STAILQ_EMPTY (&tgroup->disconnected_qpairs)) {
-    return -EBUSY;
-  }
-
-  rc = spdk_sock_group_close (&group->sock_group);
-  if (rc != 0) {
-    SPDK_ERRLOG ("Failed to close the sock group for a tcp poll group.\n");
-    assert (false);
-  }
-
-  free (tgroup);
-
-  return 0;
-}
-
-static int
-nvme_tcp_poll_group_get_stats (
-  struct spdk_nvme_transport_poll_group       *tgroup,
-  struct spdk_nvme_transport_poll_group_stat  **_stats
-  )
-{
-  struct nvme_tcp_poll_group                  *group;
-  struct spdk_nvme_transport_poll_group_stat  *stats;
-
-  if ((tgroup == NULL) || (_stats == NULL)) {
-    SPDK_ERRLOG ("Invalid stats or group pointer\n");
-    return -EINVAL;
-  }
-
-  group = nvme_tcp_poll_group (tgroup);
-
-  stats = calloc (1, sizeof (*stats));
-  if (!stats) {
-    SPDK_ERRLOG ("Can't allocate memory for TCP stats\n");
-    return -ENOMEM;
-  }
-
-  stats->trtype = SPDK_NVME_TRANSPORT_TCP;
-  memcpy (&stats->tcp, &group->stats, sizeof (group->stats));
-
-  *_stats = stats;
-
-  return 0;
-}
-
-static void
-nvme_tcp_poll_group_free_stats (
-  struct spdk_nvme_transport_poll_group       *tgroup,
-  struct spdk_nvme_transport_poll_group_stat  *stats
-  )
-{
-  free (stats);
-}
-
-const struct spdk_nvme_transport_ops  tcp_ops = {
+const struct spdk_nvme_transport_ops  g_edk_nvme_tcp_ops = {
   .name            = "TCP",
   .type            = SPDK_NVME_TRANSPORT_TCP,
-  .ctrlr_construct = nvme_tcp_ctrlr_construct,
-  .ctrlr_scan      = nvme_fabric_ctrlr_scan,
+  .ctrlr_construct = edk_nvme_tcp_ctrlr_construct,
+  .ctrlr_scan      = edk_fabric_ctrlr_scan,
   .ctrlr_destruct  = nvme_tcp_ctrlr_destruct,
   .ctrlr_enable    = nvme_tcp_ctrlr_enable,
 
-  .ctrlr_set_reg_4       = nvme_fabric_ctrlr_set_reg_4,
-  .ctrlr_set_reg_8       = nvme_fabric_ctrlr_set_reg_8,
-  .ctrlr_get_reg_4       = nvme_fabric_ctrlr_get_reg_4,
-  .ctrlr_get_reg_8       = nvme_fabric_ctrlr_get_reg_8,
   .ctrlr_set_reg_4_async = nvme_fabric_ctrlr_set_reg_4_async,
   .ctrlr_set_reg_8_async = nvme_fabric_ctrlr_set_reg_8_async,
   .ctrlr_get_reg_4_async = nvme_fabric_ctrlr_get_reg_4_async,
@@ -2851,53 +2599,11 @@ const struct spdk_nvme_transport_ops  tcp_ops = {
   .ctrlr_connect_qpair    = nvme_tcp_ctrlr_connect_qpair,
   .ctrlr_disconnect_qpair = nvme_tcp_ctrlr_disconnect_qpair,
 
-  .qpair_abort_reqs          = nvme_tcp_qpair_abort_reqs,
   .qpair_reset               = nvme_tcp_qpair_reset,
   .qpair_submit_request      = nvme_tcp_qpair_submit_request,
   .qpair_process_completions = nvme_tcp_qpair_process_completions,
   .qpair_iterate_requests    = nvme_tcp_qpair_iterate_requests,
   .admin_qpair_abort_aers    = nvme_tcp_admin_qpair_abort_aers,
-
-  .poll_group_create              = nvme_tcp_poll_group_create,
-  .qpair_get_optimal_poll_group   = nvme_tcp_qpair_get_optimal_poll_group,
-  .poll_group_connect_qpair       = nvme_tcp_poll_group_connect_qpair,
-  .poll_group_disconnect_qpair    = nvme_tcp_poll_group_disconnect_qpair,
-  .poll_group_add                 = nvme_tcp_poll_group_add,
-  .poll_group_remove              = nvme_tcp_poll_group_remove,
-  .poll_group_process_completions = nvme_tcp_poll_group_process_completions,
-  .poll_group_destroy             = nvme_tcp_poll_group_destroy,
-  .poll_group_get_stats           = nvme_tcp_poll_group_get_stats,
-  .poll_group_free_stats          = nvme_tcp_poll_group_free_stats,
 };
 
-SPDK_NVME_TRANSPORT_REGISTER (tcp, &tcp_ops);
-
-SPDK_TRACE_REGISTER_FN (nvme_tcp, "nvme_tcp", TRACE_GROUP_NVME_TCP) {
-  struct spdk_trace_tpoint_opts  opts[] = {
-    {
-      "NVME_TCP_SUBMIT", TRACE_NVME_TCP_SUBMIT,
-      OWNER_NVME_TCP_QP, OBJECT_NVME_TCP_REQ, 1,
-      {
-        { "ctx",  SPDK_TRACE_ARG_TYPE_PTR, 8 },
-        { "cid",  SPDK_TRACE_ARG_TYPE_INT, 4 },
-        { "opc",  SPDK_TRACE_ARG_TYPE_INT, 4 },
-        { "dw10", SPDK_TRACE_ARG_TYPE_PTR, 4 },
-        { "dw11", SPDK_TRACE_ARG_TYPE_PTR, 4 },
-        { "dw12", SPDK_TRACE_ARG_TYPE_PTR, 4 }
-      }
-    },
-    {
-      "NVME_TCP_COMPLETE", TRACE_NVME_TCP_COMPLETE,
-      OWNER_NVME_TCP_QP, OBJECT_NVME_TCP_REQ, 0,
-      {
-        { "ctx",  SPDK_TRACE_ARG_TYPE_PTR, 8 },
-        { "cid",  SPDK_TRACE_ARG_TYPE_INT, 4 },
-        { "cpl",  SPDK_TRACE_ARG_TYPE_PTR, 4 }
-      }
-    },
-  };
-
-  spdk_trace_register_object (OBJECT_NVME_TCP_REQ, 'p');
-  spdk_trace_register_owner (OWNER_NVME_TCP_QP, 'q');
-  spdk_trace_register_description_ext (opts, SPDK_COUNTOF (opts));
-}
+SPDK_NVME_TRANSPORT_REGISTER (tcp, &g_edk_nvme_tcp_ops);

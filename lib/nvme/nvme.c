@@ -9,6 +9,8 @@
 #include "nvme_internal.h"
 #include "nvme_io_msg.h"
 
+#include "stdlib_types.h"
+
 #define SPDK_NVME_DRIVER_NAME  "spdk_nvme_driver"
 
 struct nvme_driver  *g_spdk_nvme_driver;
@@ -1466,11 +1468,11 @@ spdk_nvme_host_id_parse (
   const char                *str
   )
 {
-  size_t  key_size = 32;
-  size_t  val_size = 1024;
+  size_t  key_size = KEYSIZE;
+  size_t  val_size = VALSIZE;
   size_t  val_len;
-  char    key[key_size];
-  char    val[val_size];
+  char    key[KEYSIZE];
+  char    val[VALSIZE];
 
   if ((hostid == NULL) || (str == NULL)) {
     return -EINVAL;
@@ -1557,8 +1559,8 @@ spdk_nvme_transport_id_compare (
   }
 
   if (trid1->trtype == SPDK_NVME_TRANSPORT_PCIE) {
-    struct spdk_pci_addr  pci_addr1 = { };
-    struct spdk_pci_addr  pci_addr2 = { };
+    struct spdk_pci_addr  pci_addr1 = { 0 };
+    struct spdk_pci_addr  pci_addr2 = { 0 };
 
     /* Normalize PCI addresses before comparing */
     if ((spdk_pci_addr_parse (&pci_addr1, trid1->traddr) < 0) ||

@@ -1503,7 +1503,11 @@ nvme_ctrlr_enable (
   cc.bits.iocqes = 4;       /* CQ entry size == 16 == 2^4 */
 
   /* Page size is 2 ^ (12 + mps). */
-  cc.bits.mps = spdk_u32log2 (ctrlr->page_size) - 12;
+  if (ctrlr->page_size > 0) {
+    cc.bits.mps = spdk_u32log2 (ctrlr->page_size) - 12;
+  } else {
+    cc.bits.mps = 0;
+  }
 
   /*
    * Since NVMe 1.0, a controller should have at least one bit set in CAP.CSS.
@@ -1930,7 +1934,7 @@ nvme_ctrlr_abort_queued_aborts (
   )
 {
   struct nvme_request   *req, *tmp;
-  struct spdk_nvme_cpl  cpl = { };
+  struct spdk_nvme_cpl  cpl = { 0 };
 
   cpl.status.sc  = SPDK_NVME_SC_ABORTED_SQ_DELETION;
   cpl.status.sct = SPDK_NVME_SCT_GENERIC;
@@ -2015,8 +2019,6 @@ spdk_nvme_ctrlr_reconnect_async (
   struct spdk_nvme_ctrlr  *ctrlr
   )
 {
-  nvme_robust_mutex_lock (&ctrlr->ctrlr_lock);
-
   ctrlr->prepare_for_reset = false;
 
   /* Set the state back to INIT to cause a full hardware reset. */
@@ -2094,8 +2096,6 @@ spdk_nvme_ctrlr_reconnect_poll_async (
   }
 
   ctrlr->is_resetting = false;
-
-  nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
 
   if (!ctrlr->cdata.oaes.ns_attribute_notices) {
     /*
@@ -2946,7 +2946,13 @@ nvme_ctrlr_identify_active_ns (
     return -ENOMEM;
   }
 
+  if (ctx->deleter) {
+    nvme_ctrlr_identify_active_ns_async (ctx);
+    return 0;
+  }
+
   nvme_ctrlr_identify_active_ns_async (ctx);
+
   while (ctx->state == NVME_ACTIVE_NS_STATE_PROCESSING) {
     rc = spdk_nvme_qpair_process_completions (ctrlr->adminq, 0);
     if (rc < 0) {
@@ -5223,7 +5229,9 @@ spdk_nvme_ctrlr_process_admin_completions (
   /* Each process has an async list, complete the ones for this process object */
   active_proc = nvme_ctrlr_get_current_process (ctrlr);
   if (active_proc) {
+    nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
     nvme_ctrlr_complete_queued_async_events (ctrlr);
+    nvme_robust_mutex_lock (&ctrlr->ctrlr_lock);
   }
 
   if ((rc == -ENXIO) && ctrlr->is_disconnecting) {
@@ -5234,6 +5242,11 @@ spdk_nvme_ctrlr_process_admin_completions (
 
   if (rc < 0) {
     num_completions = rc;
+  } else if (rc > INT_MAX - num_completions) {
+    //
+    // Handle potential overflow of num_completions.
+    //
+    num_completions = INT_MAX;
   } else {
     num_completions += rc;
   }
@@ -5853,7 +5866,7 @@ spdk_nvme_ctrlr_update_firmware (
       return -ENXIO;
     }
 
-    p              += transfer;
+    p               = (char *)p + transfer;
     offset         += transfer;
     size_remaining -= transfer;
   }
@@ -6043,7 +6056,7 @@ spdk_nvme_ctrlr_read_boot_partition_start (
 
   nvme_robust_mutex_lock (&ctrlr->ctrlr_lock);
 
-  bpmb_size = bprsz * 4096;
+  bpmb_size = bprsz * (uint64_t)4096;
   bpmbl     = spdk_vtophys (payload, &bpmb_size);
   if (bpmbl == SPDK_VTOPHYS_ERROR) {
     NVME_CTRLR_ERRLOG (ctrlr, "spdk_vtophys of bpmbl failed\n");
@@ -6051,7 +6064,7 @@ spdk_nvme_ctrlr_read_boot_partition_start (
     return -EFAULT;
   }
 
-  if (bpmb_size != bprsz * 4096) {
+  if (bpmb_size != bprsz * (uint64_t)4096) {
     NVME_CTRLR_ERRLOG (ctrlr, "Boot Partition buffer is not physically contiguous\n");
     nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
     return -EFAULT;
@@ -6134,7 +6147,7 @@ nvme_write_boot_partition_cb (
 
   if (ctrlr->bp_ws == SPDK_NVME_BP_WS_DOWNLOADING) {
     NVME_CTRLR_DEBUGLOG (ctrlr, "Boot Partition Downloading at Offset %d Success\n", ctrlr->fw_offset);
-    ctrlr->fw_payload        += ctrlr->fw_transfer_size;
+    ctrlr->fw_payload         = (char *)ctrlr->fw_payload+ ctrlr->fw_transfer_size;
     ctrlr->fw_offset         += ctrlr->fw_transfer_size;
     ctrlr->fw_size_remaining -= ctrlr->fw_transfer_size;
     ctrlr->fw_transfer_size   = spdk_min (ctrlr->fw_size_remaining, ctrlr->min_page_size);
@@ -6384,16 +6397,14 @@ spdk_nvme_ctrlr_alloc_qid (
   uint32_t  qid;
 
   assert (ctrlr->free_io_qids);
-  nvme_robust_mutex_lock (&ctrlr->ctrlr_lock);
+
   qid = spdk_bit_array_find_first_set (ctrlr->free_io_qids, 1);
   if (qid > ctrlr->opts.num_io_queues) {
     NVME_CTRLR_ERRLOG (ctrlr, "No free I/O queue IDs\n");
-    nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
     return -1;
   }
 
   spdk_bit_array_clear (ctrlr->free_io_qids, qid);
-  nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
   return qid;
 }
 
@@ -6405,13 +6416,9 @@ spdk_nvme_ctrlr_free_qid (
 {
   assert (qid <= ctrlr->opts.num_io_queues);
 
-  nvme_robust_mutex_lock (&ctrlr->ctrlr_lock);
-
   if (spdk_likely (ctrlr->free_io_qids)) {
     spdk_bit_array_set (ctrlr->free_io_qids, qid);
   }
-
-  nvme_robust_mutex_unlock (&ctrlr->ctrlr_lock);
 }
 
 int

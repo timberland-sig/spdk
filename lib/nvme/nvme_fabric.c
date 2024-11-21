@@ -30,7 +30,7 @@ nvme_fabric_prop_set_cmd (
   void                    *cb_arg
   )
 {
-  struct spdk_nvmf_fabric_prop_set_cmd  cmd = { };
+  struct spdk_nvmf_fabric_prop_set_cmd  cmd = { 0 };
 
   assert (size == SPDK_NVMF_PROP_SIZE_4 || size == SPDK_NVMF_PROP_SIZE_8);
 
@@ -154,7 +154,7 @@ nvme_fabric_prop_get_cmd (
   void                    *cb_arg
   )
 {
-  struct spdk_nvmf_fabric_prop_set_cmd  cmd = { };
+  struct spdk_nvmf_fabric_prop_set_cmd  cmd = { 0 };
 
   assert (size == SPDK_NVMF_PROP_SIZE_4 || size == SPDK_NVMF_PROP_SIZE_8);
 
@@ -429,11 +429,21 @@ nvme_fabric_discover_probe (
   }
 
   len = end - entry->subnqn;
+  if (len > SPDK_NVMF_NQN_MAX_LEN) {
+    SPDK_ERRLOG ("Discovery entry SUBNQN is too long\n");
+    len = SPDK_NVMF_NQN_MAX_LEN;
+  }
+
   memcpy (trid.subnqn, entry->subnqn, len);
   trid.subnqn[len] = '\0';
 
   /* Convert traddr to a null terminated string. */
   len = spdk_strlen_pad (entry->traddr, sizeof (entry->traddr), ' ');
+  if (len > SPDK_NVMF_TRADDR_MAX_LEN) {
+    SPDK_ERRLOG ("Discovery entry TRADDR is too long\n");
+    len = SPDK_NVMF_TRADDR_MAX_LEN;
+  }
+
   memcpy (trid.traddr, entry->traddr, len);
   if (spdk_str_chomp (trid.traddr) != 0) {
     SPDK_DEBUGLOG (nvme, "Trailing newlines removed from discovery TRADDR\n");
@@ -441,6 +451,11 @@ nvme_fabric_discover_probe (
 
   /* Convert trsvcid to a null terminated string. */
   len = spdk_strlen_pad (entry->trsvcid, sizeof (entry->trsvcid), ' ');
+  if (len > SPDK_NVMF_TRSVCID_MAX_LEN) {
+    SPDK_ERRLOG ("Discovery entry TRSVCID is too long\n");
+    len = SPDK_NVMF_TRSVCID_MAX_LEN;
+  }
+
   memcpy (trid.trsvcid, entry->trsvcid, len);
   if (spdk_str_chomp (trid.trsvcid) != 0) {
     SPDK_DEBUGLOG (nvme, "Trailing newlines removed from discovery TRSVCID\n");
